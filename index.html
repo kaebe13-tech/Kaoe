@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="theme-color" content="#000010">
-    <title>NEON DRIFT — Cyberpunk Endless Runner</title>
+    <title>NEON DRIFT - Cyberpunk Endless Runner</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet">
@@ -83,7 +83,6 @@
             transition: opacity 0.3s;
             mix-blend-mode: screen;
         }
-
         #timestop-overlay.active { opacity: 1; }
 
         /* Glitch tint overlay */
@@ -100,7 +99,6 @@
             opacity: 0;
             transition: opacity 0.2s;
         }
-
         #glitch-overlay.active { opacity: 1; animation: glitchShift 0.15s infinite; }
 
         @keyframes glitchShift {
@@ -108,6 +106,72 @@
             25% { transform: translate(-2px, 1px); }
             50% { transform: translate(2px, -1px); }
             75% { transform: translate(-1px, 2px); }
+        }
+
+        /* Rewind overlay */
+        #rewind-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 7;
+            pointer-events: none;
+            background: radial-gradient(ellipse at center,
+                rgba(160, 0, 255, 0.1),
+                rgba(80, 0, 180, 0.25));
+            opacity: 0;
+            transition: opacity 0.3s;
+            mix-blend-mode: screen;
+        }
+        #rewind-overlay.active { opacity: 1; }
+
+        /* Magnet overlay */
+        #magnet-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 7;
+            pointer-events: none;
+            background: radial-gradient(ellipse at center,
+                rgba(0, 255, 180, 0.06),
+                rgba(0, 200, 150, 0.15));
+            opacity: 0;
+            transition: opacity 0.3s;
+            mix-blend-mode: screen;
+        }
+        #magnet-overlay.active { opacity: 1; }
+
+        /* Shield overlay */
+        #shield-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 7;
+            pointer-events: none;
+            background: radial-gradient(ellipse at center,
+                rgba(255, 200, 0, 0.06),
+                rgba(200, 150, 0, 0.12));
+            opacity: 0;
+            transition: opacity 0.3s;
+            mix-blend-mode: screen;
+        }
+        #shield-overlay.active { opacity: 1; }
+
+        /* Milestone flash */
+        #milestone-flash {
+            position: fixed;
+            inset: 0;
+            z-index: 8;
+            pointer-events: none;
+            opacity: 0;
+            background: radial-gradient(ellipse at center,
+                transparent 30%,
+                rgba(0, 200, 220, 0.4) 100%);
+            transition: opacity 0.15s;
+        }
+        #milestone-flash.active {
+            opacity: 1;
+            animation: milestoneFlash 0.8s ease-out forwards;
+        }
+        @keyframes milestoneFlash {
+            0% { opacity: 1; }
+            100% { opacity: 0; }
         }
 
         /* ============================================================
@@ -122,6 +186,10 @@
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
+        }
+
+        #hud.hidden {
+            display: none;
         }
 
         .hud-panel {
@@ -164,6 +232,11 @@
         #hud-speed .hud-value {
             color: #d987d9;
             text-shadow: 0 0 6px rgba(220, 100, 220, 0.4);
+        }
+
+        #hud-multiplier .hud-value {
+            color: #66ffaa;
+            text-shadow: 0 0 6px rgba(100, 255, 170, 0.4);
         }
 
         #hud-left, #hud-right {
@@ -228,6 +301,15 @@
             background-size: 200% 100%;
             animation: glitchBar 0.4s linear infinite;
             box-shadow: 0 0 10px #ff00aa;
+        }
+
+        #powerup-display.magnet .powerup-label {
+            color: #66ffcc;
+            text-shadow: 0 0 8px #00ffaa;
+        }
+        #powerup-display.magnet .powerup-fill {
+            background: linear-gradient(90deg, #00cc88, #66ffcc);
+            box-shadow: 0 0 10px #00cc88;
         }
 
         @keyframes glitchBar {
@@ -389,7 +471,7 @@
 
         .powerup-legend {
             display: flex;
-            gap: 30px;
+            gap: 20px;
             margin-top: 18px;
             justify-content: center;
             flex-wrap: wrap;
@@ -412,12 +494,15 @@
 
         .legend-icon.timestop { background: #4080ff; box-shadow: 0 0 8px #4080ff; }
         .legend-icon.glitch   { background: #ff00aa; box-shadow: 0 0 8px #ff00aa; }
+        .legend-icon.rewind   { background: #aa00ff; box-shadow: 0 0 8px #aa00ff; }
+        .legend-icon.magnet   { background: #00cc88; box-shadow: 0 0 8px #00cc88; }
+        .legend-icon.shield   { background: #ffcc00; box-shadow: 0 0 8px #ffcc00; }
         .legend-icon.token    { background: #ffaa00; box-shadow: 0 0 8px #ffaa00; }
 
         /* ============================================================
            COMBO + NOTIFICATION POPUPS
            ============================================================ */
-        #combo-popup, #powerup-popup {
+        #combo-popup, #powerup-popup, #milestone-popup {
             position: fixed;
             top: 28%;
             left: 50%;
@@ -443,7 +528,14 @@
             font-size: 28px;
         }
 
-        #combo-popup.show, #powerup-popup.show {
+        #milestone-popup {
+            font-size: 32px;
+            top: 38%;
+            color: #ff66cc;
+            text-shadow: 0 0 12px rgba(255, 100, 200, 0.6);
+        }
+
+        #combo-popup.show, #powerup-popup.show, #milestone-popup.show {
             opacity: 1;
             transform: translate(-50%, -50%) scale(1);
         }
@@ -512,7 +604,7 @@
             .hud-value { font-size: 18px; }
             .hud-label { font-size: 9px; letter-spacing: 2px; }
             .controls-hint { font-size: 10px; }
-            .powerup-legend { gap: 14px; }
+            .powerup-legend { gap: 10px; }
         }
     </style>
 </head>
@@ -523,6 +615,10 @@
     <div id="vignette"></div>
     <div id="timestop-overlay"></div>
     <div id="glitch-overlay"></div>
+    <div id="rewind-overlay"></div>
+    <div id="magnet-overlay"></div>
+    <div id="shield-overlay"></div>
+    <div id="milestone-flash"></div>
 
     <!-- HUD -->
     <div id="hud" class="hidden">
@@ -534,6 +630,10 @@
             <div class="hud-panel" id="hud-speed">
                 <div class="hud-label">VELOCITY</div>
                 <div class="hud-value"><span id="speed-value">0</span></div>
+            </div>
+            <div class="hud-panel" id="hud-multiplier">
+                <div class="hud-label">MULTIPLIER</div>
+                <div class="hud-value">x<span id="multiplier-value">1.0</span></div>
             </div>
         </div>
         <div id="hud-right">
@@ -558,6 +658,7 @@
 
     <div id="combo-popup"></div>
     <div id="powerup-popup"></div>
+    <div id="milestone-popup"></div>
 
     <!-- START MENU -->
     <div id="start-menu" class="overlay">
@@ -571,13 +672,16 @@
         </div>
         <button id="play-btn" class="neon-btn">JACK IN</button>
         <div class="controls-hint">
-            <span class="key">A</span> <span class="key">←</span>
-            <span class="key">D</span> <span class="key">→</span> &nbsp; LANE SHIFT &nbsp;|&nbsp;
-            <span class="key">W</span> <span class="key">↑</span> <span class="key">SPACE</span> &nbsp; JUMP
+            <span class="key">A</span> <span class="key">D</span> LANE SHIFT |
+            <span class="key">W</span> <span class="key">SPACE</span> JUMP |
+            <span class="key">S</span> <span class="key">DOWN</span> SLIDE
             <div class="powerup-legend">
                 <div class="legend-item"><div class="legend-icon token"></div> SHARD</div>
                 <div class="legend-item"><div class="legend-icon timestop"></div> TIME STOP</div>
-                <div class="legend-item"><div class="legend-icon glitch"></div> GLITCH PHASE</div>
+                <div class="legend-item"><div class="legend-icon glitch"></div> GLITCH</div>
+                <div class="legend-item"><div class="legend-icon rewind"></div> REWIND</div>
+                <div class="legend-item"><div class="legend-icon magnet"></div> MAGNET</div>
+                <div class="legend-item"><div class="legend-icon shield"></div> SHIELD</div>
             </div>
         </div>
     </div>
@@ -637,6 +741,7 @@
         SEGMENT_COUNT:       8,
 
         JUMP_VELOCITY:       9.0,
+        DOUBLE_JUMP_VELOCITY: 7.5,
         GRAVITY:             22.0,
         LANE_LERP_SPEED:     16.0,
 
@@ -652,11 +757,15 @@
         TOKEN_SPACING_MIN:   8,
         TOKEN_SPACING_MAX:   16,
 
-        // Power-ups (rare drops)
         POWERUP_SPACING_MIN: 35,
         POWERUP_SPACING_MAX: 60,
-        TIMESTOP_DURATION:   4.0,    // seconds frozen
-        GLITCH_DURATION:     3.5,    // seconds invincible
+        TIMESTOP_DURATION:   5.0,
+        GLITCH_DURATION:     3.5,
+        MAGNET_DURATION:     5.0,
+        MAGNET_RADIUS:       8.0,
+
+        SLIDE_DURATION:      0.6,
+        SLIDE_COOLDOWN:      0.3,
 
         CAMERA_LERP:         5.5,
         SHAKE_DECAY:         6.0,
@@ -667,6 +776,16 @@
 
         DISTANCE_MULT:       1.0,
         TOKEN_VALUE:         50,
+
+        MULTIPLIER_GAIN_INTERVAL: 500,
+        MULTIPLIER_GAIN_AMOUNT:   0.1,
+        MULTIPLIER_MAX:           5.0,
+
+        MILESTONE_SPEED_INTERVAL: 5,
+
+        CITY_BUILDING_COUNT: 80,
+        CITY_RECYCLE_BEHIND: 40,
+        CITY_SPAWN_AHEAD:    120,
     };
 
     const STATE = Object.freeze({
@@ -679,6 +798,9 @@
     const POWERUP_TYPE = Object.freeze({
         TIMESTOP: 'TIMESTOP',
         GLITCH:   'GLITCH',
+        REWIND:   'REWIND',
+        MAGNET:   'MAGNET',
+        SHIELD:   'SHIELD',
     });
 
     const tmpVec  = new THREE.Vector3();
@@ -701,10 +823,35 @@
             this.fovTarget = CONFIG.FOV_BASE;
 
             // Power-up state
-            this.activePowerup = null;        // 'TIMESTOP' | 'GLITCH' | null
+            this.activePowerup = null;
             this.powerupTimer  = 0;
             this.powerupDuration = 0;
-            this.glitchTriggerTimer = 0;      // momentary glitch on death
+            this.glitchTriggerTimer = 0;
+
+            // Time Stop slow-mo
+            this.timeStopSpeedStore = 0;
+
+            // Rewind checkpoint
+            this.rewindCheckpoint = null;
+
+            // Magnet active flag
+            this.magnetActive = false;
+
+            // Shield state
+            this.shieldActive = false;
+            this.shieldMesh = null;
+
+            // Slide state
+            this.isSliding = false;
+            this.slideTimer = 0;
+            this.slideCooldown = 0;
+
+            // Score multiplier
+            this.multiplier = 1.0;
+            this.distanceSinceLastMultiplier = 0;
+
+            // Difficulty milestones
+            this.lastMilestoneSpeed = CONFIG.BASE_SPEED;
 
             this.clock = new THREE.Clock();
             this.scene = null;
@@ -713,7 +860,7 @@
             this.composer = null;
 
             this.pathSegments = [];
-            this.cityGroup = null;
+            this.cityBuildings = [];
             this.dirLight = null;
             this.playerLight = null;
             this.accentLight = null;
@@ -727,6 +874,7 @@
                 targetX: CONFIG.LANES[1],
                 velocityY: 0,
                 isGrounded: true,
+                jumpCount: 0,
             };
 
             this.obstacles = [];
@@ -773,7 +921,6 @@
             this.renderer.shadowMap.enabled = true;
             this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
             this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-            // Reduced exposure for darker, less blown-out look
             this.renderer.toneMappingExposure = 0.65;
             this.renderer.outputColorSpace = THREE.SRGBColorSpace;
             document.getElementById('canvas-container').appendChild(this.renderer.domElement);
@@ -783,7 +930,6 @@
         initScene() {
             this.scene = new THREE.Scene();
             this.scene.background = new THREE.Color(0x020108);
-            // Closer fog for moodier atmosphere
             this.scene.fog = new THREE.Fog(0x040210, 22, 78);
 
             this.camera = new THREE.PerspectiveCamera(
@@ -798,14 +944,12 @@
         }
 
         initLighting() {
-            // Lower ambient for darker base
             const ambient = new THREE.AmbientLight(0x141428, 0.4);
             this.scene.add(ambient);
 
             const hemi = new THREE.HemisphereLight(0x2a2a55, 0x080018, 0.25);
             this.scene.add(hemi);
 
-            // Cooler, dimmer directional
             this.dirLight = new THREE.DirectionalLight(0x8090b8, 0.55);
             this.dirLight.position.set(8, 18, 6);
             this.dirLight.castShadow = true;
@@ -819,12 +963,10 @@
             this.scene.add(this.dirLight);
             this.scene.add(this.dirLight.target);
 
-            // Player follow light - dimmer
             this.playerLight = new THREE.PointLight(0x00ccdd, 1.8, 14, 1.6);
             this.playerLight.position.set(0, 2.4, 0);
             this.scene.add(this.playerLight);
 
-            // Accent light - dimmer
             this.accentLight = new THREE.PointLight(0xcc00cc, 1.2, 22, 1.4);
             this.accentLight.position.set(0, 3, -18);
             this.scene.add(this.accentLight);
@@ -837,16 +979,14 @@
 
             this.composer.addPass(new RenderPass(this.scene, this.camera));
 
-            // Much subtler bloom - only the brightest neon should glow
             this.bloomPass = new UnrealBloomPass(
                 new THREE.Vector2(window.innerWidth, window.innerHeight),
-                0.45,   // strength (was 0.95)
-                0.4,    // radius
-                0.55    // threshold (was 0.18 - now only very bright pixels glow)
+                0.45,
+                0.4,
+                0.55
             );
             this.composer.addPass(this.bloomPass);
 
-            // Glitch pass - disabled by default, toggled on power-up / death
             this.glitchPass = new GlitchPass();
             this.glitchPass.enabled = false;
             this.glitchPass.goWild = false;
@@ -866,8 +1006,8 @@
                 this.scene.add(seg);
             }
 
-            this.cityGroup = new THREE.Group();
-            for (let i = 0; i < 80; i++) {
+            // City buildings - stored individually for recycling
+            for (let i = 0; i < CONFIG.CITY_BUILDING_COUNT; i++) {
                 const w = 2 + Math.random() * 4;
                 const h = 6 + Math.random() * 28;
                 const d = 2 + Math.random() * 4;
@@ -879,7 +1019,6 @@
                 const mat = new THREE.MeshStandardMaterial({
                     color: 0x030308,
                     emissive: color,
-                    // MUCH dimmer buildings - they're far background
                     emissiveIntensity: 0.12 + Math.random() * 0.18,
                     metalness: 0.85,
                     roughness: 0.55,
@@ -890,12 +1029,14 @@
                     h / 2 - 1,
                     -i * 8 - Math.random() * 12
                 );
-                this.cityGroup.add(building);
+                building.userData.side = side;
+                building.userData.height = h;
+                this.scene.add(building);
+                this.cityBuildings.push(building);
             }
-            this.scene.add(this.cityGroup);
 
             const farFloor = new THREE.Mesh(
-                new THREE.PlaneGeometry(400, 400),
+                new THREE.PlaneGeometry(300, 600),
                 new THREE.MeshStandardMaterial({
                     color: 0x010108,
                     metalness: 0.6,
@@ -926,11 +1067,10 @@
             path.receiveShadow = true;
             group.add(path);
 
-            // Edge strips - dimmer
             const edgeMat = new THREE.MeshStandardMaterial({
                 color: 0x00aacc,
                 emissive: 0x00aacc,
-                emissiveIntensity: 1.4,   // was 2.8
+                emissiveIntensity: 1.4,
             });
             for (const side of [-1, 1]) {
                 const edge = new THREE.Mesh(
@@ -941,11 +1081,10 @@
                 group.add(edge);
             }
 
-            // Lane dashes
             const dashMat = new THREE.MeshStandardMaterial({
                 color: 0xaa00aa,
                 emissive: 0xaa00aa,
-                emissiveIntensity: 0.9,   // was 1.8
+                emissiveIntensity: 0.9,
             });
             const dashCount = Math.floor(CONFIG.SEGMENT_LENGTH / 3);
             for (const lane of [-1, 1]) {
@@ -963,7 +1102,6 @@
                 }
             }
 
-            // Pylons + rings (much dimmer)
             const pylonMat = new THREE.MeshStandardMaterial({
                 color: 0x0c0c1a,
                 emissive: 0x220033,
@@ -974,7 +1112,7 @@
             const ringMat = new THREE.MeshStandardMaterial({
                 color: 0x00aacc,
                 emissive: 0x00aacc,
-                emissiveIntensity: 1.3,    // was 2.5
+                emissiveIntensity: 1.3,
             });
             const pylonCount = Math.floor(CONFIG.SEGMENT_LENGTH / 6);
             for (const side of [-1, 1]) {
@@ -1012,7 +1150,7 @@
             const bodyMat = new THREE.MeshStandardMaterial({
                 color: 0x00bbcc,
                 emissive: 0x00bbcc,
-                emissiveIntensity: 0.7,    // was 1.4
+                emissiveIntensity: 0.7,
                 metalness: 1,
                 roughness: 0.1,
                 transparent: true,
@@ -1033,7 +1171,7 @@
             const wingMat = new THREE.MeshStandardMaterial({
                 color: 0xaa00aa,
                 emissive: 0xaa00aa,
-                emissiveIntensity: 0.9,    // was 2.0
+                emissiveIntensity: 0.9,
             });
             for (const s of [-1, 1]) {
                 const wing = new THREE.Mesh(
@@ -1044,6 +1182,20 @@
                 wing.rotation.z = s * 0.3;
                 playerGroup.add(wing);
             }
+
+            // Shield mesh (invisible until shield powerup)
+            const shieldGeo = new THREE.SphereGeometry(1.0, 16, 16);
+            const shieldMat = new THREE.MeshStandardMaterial({
+                color: 0xffcc00,
+                emissive: 0xffcc00,
+                emissiveIntensity: 0.6,
+                transparent: true,
+                opacity: 0.25,
+                side: THREE.DoubleSide,
+            });
+            this.shieldMesh = new THREE.Mesh(shieldGeo, shieldMat);
+            this.shieldMesh.visible = false;
+            playerGroup.add(this.shieldMesh);
 
             playerGroup.position.set(0, CONFIG.GROUND_Y, 0);
             this.scene.add(playerGroup);
@@ -1059,7 +1211,7 @@
                 const mat = new THREE.MeshStandardMaterial({
                     color: 0xffffff,
                     emissive: 0xffffff,
-                    emissiveIntensity: 1.2,    // was 2.5
+                    emissiveIntensity: 1.2,
                     transparent: true,
                     opacity: 1,
                 });
@@ -1137,6 +1289,7 @@
                 if (k === 'arrowleft'  || k === 'a') { this.shiftLane(-1); e.preventDefault(); }
                 else if (k === 'arrowright' || k === 'd') { this.shiftLane(1);  e.preventDefault(); }
                 else if (k === 'arrowup'    || k === 'w' || k === ' ') { this.jump(); e.preventDefault(); }
+                else if (k === 'arrowdown'  || k === 's') { this.slide(); e.preventDefault(); }
             });
 
             let touchStart = null;
@@ -1159,6 +1312,7 @@
                 if (absX < T && absY < T) this.jump();
                 else if (absX > absY) (dx > 0) ? this.shiftLane(1) : this.shiftLane(-1);
                 else if (dy < -T) this.jump();
+                else if (dy > T) this.slide();
             }, { passive: true });
         }
 
@@ -1178,13 +1332,35 @@
         }
 
         jump() {
-            if (!this.playerState.isGrounded) return;
-            this.playerState.velocityY = CONFIG.JUMP_VELOCITY;
-            this.playerState.isGrounded = false;
-            this.spawnParticles(
-                tmpVec.set(this.player.position.x, 0.05, this.player.position.z),
-                0x00ccdd, 8, 4
-            );
+            if (this.isSliding) {
+                this.isSliding = false;
+                this.slideTimer = 0;
+                this.playerBody.scale.set(1, 1.4, 1);
+            }
+
+            if (this.playerState.isGrounded) {
+                this.playerState.velocityY = CONFIG.JUMP_VELOCITY;
+                this.playerState.isGrounded = false;
+                this.playerState.jumpCount = 1;
+                this.spawnParticles(
+                    tmpVec.set(this.player.position.x, 0.05, this.player.position.z),
+                    0x00ccdd, 8, 4
+                );
+            } else if (this.playerState.jumpCount < 2) {
+                // Double jump
+                this.playerState.velocityY = CONFIG.DOUBLE_JUMP_VELOCITY;
+                this.playerState.jumpCount = 2;
+                this.spawnParticles(
+                    tmpVec.set(this.player.position.x, this.player.position.y, this.player.position.z),
+                    0x88ddff, 12, 5
+                );
+            }
+        }
+
+        slide() {
+            if (this.isSliding || this.slideCooldown > 0 || !this.playerState.isGrounded) return;
+            this.isSliding = true;
+            this.slideTimer = CONFIG.SLIDE_DURATION;
         }
 
         /* ============================================================
@@ -1198,8 +1374,30 @@
         }
 
         gameOver() {
-            // Glitch effect doubles as "shield" — if active, no death
-            if (this.activePowerup === POWERUP_TYPE.GLITCH) return;
+            // Reset slide state
+            if (this.isSliding) {
+                this.isSliding = false;
+                this.slideTimer = 0;
+                this.slideCooldown = 0;
+                this.playerBody.scale.set(1, 1.4, 1);
+            }
+
+            // Shield absorbs one hit
+            if (this.shieldActive) {
+                this.shieldActive = false;
+                this.shieldMesh.visible = false;
+                document.getElementById('shield-overlay').classList.remove('active');
+                this.spawnParticles(this.player.position.clone(), 0xffcc00, 25, 8);
+                this.shakeIntensity = 0.6;
+                this.showPowerupPopup('SHIELD BREAK', '#ffcc00');
+                return;
+            }
+
+            // Rewind: revive at checkpoint
+            if (this.rewindCheckpoint) {
+                this.triggerRewind();
+                return;
+            }
 
             this.state = STATE.GAME_OVER;
             const finalScore = Math.floor(this.score);
@@ -1211,26 +1409,95 @@
             document.getElementById('final-tokens').textContent = this.tokens;
             document.getElementById('final-best').textContent   = this.bestScore;
             document.getElementById('best-score').textContent   = this.bestScore;
+            document.getElementById('best-score-menu').textContent = this.bestScore;
             document.getElementById('hud').classList.add('hidden');
             document.getElementById('game-over').classList.remove('hidden');
 
             this.shakeIntensity = 1.4;
-            this.glitchTriggerTimer = 0.6;       // brief glitch effect on death
+            this.glitchTriggerTimer = 0.6;
             this.glitchPass.enabled = true;
             this.glitchPass.goWild = true;
+
+            // Clear stored speed so deactivatePowerup does not restore it in GAME_OVER state
+            this.timeStopSpeedStore = 0;
+            this.deactivatePowerup();
+
+            this.magnetActive = false;
+            this.shieldActive = false;
+            this.shieldMesh.visible = false;
+            document.getElementById('magnet-overlay').classList.remove('active');
+            document.getElementById('shield-overlay').classList.remove('active');
 
             this.spawnParticles(this.player.position.clone(), 0xff2244, 35, 9);
             this.spawnParticles(this.player.position.clone(), 0xff8800, 18, 6);
         }
 
+        triggerRewind() {
+            const cp = this.rewindCheckpoint;
+            this.rewindCheckpoint = null;
+
+            // Clear any active timed powerup to prevent timer artifacts after rewind
+            if (this.activePowerup) {
+                this.deactivatePowerup();
+            }
+
+            // Visual feedback
+            this.shakeIntensity = 0.8;
+            this.spawnParticles(this.player.position.clone(), 0xaa00ff, 30, 8);
+            this.showPowerupPopup('TIME REWIND', '#cc66ff');
+
+            // Flash rewind overlay briefly
+            const overlay = document.getElementById('rewind-overlay');
+            overlay.classList.add('active');
+            setTimeout(() => overlay.classList.remove('active'), 600);
+
+            // Restore position
+            this.player.position.set(CONFIG.LANES[cp.lane], CONFIG.GROUND_Y, cp.z);
+            this.playerState.currentLane = cp.lane;
+            this.playerState.targetX = CONFIG.LANES[cp.lane];
+            this.playerState.velocityY = 0;
+            this.playerState.isGrounded = true;
+            this.playerState.jumpCount = 0;
+            this.isSliding = false;
+            this.slideTimer = 0;
+            this.slideCooldown = 0;
+            this.playerBody.scale.set(1, 1.4, 1);
+
+            // Reset spawn cursors relative to checkpoint so spawning resumes normally
+            this.lastObstacleZ = cp.z - 22;
+            this.lastTokenZ = cp.z - 14;
+            this.lastPowerupZ = cp.z - 45;
+
+            // Remove nearby obstacles to give breathing room
+            for (let i = this.obstacles.length - 1; i >= 0; i--) {
+                const o = this.obstacles[i];
+                const dist = Math.abs(o.mesh.position.z - cp.z);
+                if (dist < 30) {
+                    this.disposeMesh(o.mesh);
+                    this.scene.remove(o.mesh);
+                    this.obstacles.splice(i, 1);
+                }
+            }
+            // Also remove nearby tokens to prevent confusion
+            for (let i = this.tokensArr.length - 1; i >= 0; i--) {
+                const t = this.tokensArr[i];
+                const dist = Math.abs(t.mesh.position.z - cp.z);
+                if (dist < 10) {
+                    this.disposeMesh(t.mesh);
+                    this.scene.remove(t.mesh);
+                    this.tokensArr.splice(i, 1);
+                }
+            }
+        }
+
         resetGame() {
             this.state = STATE.RESET;
 
-            for (const o of this.obstacles) this.scene.remove(o.mesh);
+            for (const o of this.obstacles) { this.disposeMesh(o.mesh); this.scene.remove(o.mesh); }
             this.obstacles.length = 0;
-            for (const t of this.tokensArr) this.scene.remove(t.mesh);
+            for (const t of this.tokensArr) { this.disposeMesh(t.mesh); this.scene.remove(t.mesh); }
             this.tokensArr.length = 0;
-            for (const p of this.powerups) this.scene.remove(p.mesh);
+            for (const p of this.powerups) { this.disposeMesh(p.mesh); this.scene.remove(p.mesh); }
             this.powerups.length = 0;
             for (const p of this.particlePool) {
                 p.userData.active = false;
@@ -1251,18 +1518,44 @@
             this.glitchPass.enabled = false;
             this.glitchPass.goWild = false;
 
+            // Reset new state
+            this.rewindCheckpoint = null;
+            this.magnetActive = false;
+            this.shieldActive = false;
+            this.shieldMesh.visible = false;
+            this.isSliding = false;
+            this.slideTimer = 0;
+            this.slideCooldown = 0;
+            this.multiplier = 1.0;
+            this.distanceSinceLastMultiplier = 0;
+            this.lastMilestoneSpeed = CONFIG.BASE_SPEED;
+            this.timeStopSpeedStore = 0;
+
             this.playerState.currentLane = 1;
             this.playerState.targetX = CONFIG.LANES[1];
             this.playerState.velocityY = 0;
             this.playerState.isGrounded = true;
+            this.playerState.jumpCount = 0;
             this.player.position.set(0, CONFIG.GROUND_Y, 0);
             this.playerBody.rotation.set(0, 0, 0);
+            this.playerBody.scale.set(1, 1.4, 1);
 
             for (let i = 0; i < this.pathSegments.length; i++) {
                 this.pathSegments[i].position.z = -i * CONFIG.SEGMENT_LENGTH + CONFIG.SEGMENT_LENGTH;
             }
 
+            // Reset city buildings around origin
+            for (let i = 0; i < this.cityBuildings.length; i++) {
+                const b = this.cityBuildings[i];
+                b.position.z = -i * 8 - Math.random() * 12;
+            }
+
             this.prewarmSpawns();
+
+            // Clear overlays
+            document.getElementById('shield-overlay').classList.remove('active');
+            document.getElementById('magnet-overlay').classList.remove('active');
+            document.getElementById('rewind-overlay').classList.remove('active');
 
             document.getElementById('game-over').classList.add('hidden');
             document.getElementById('hud').classList.remove('hidden');
@@ -1275,7 +1568,7 @@
         prewarmSpawns() {
             this.lastObstacleZ = -22;
             this.lastTokenZ = -14;
-            this.lastPowerupZ = -45;     // first power-up further out
+            this.lastPowerupZ = -45;
             const targetZ = this.player ? this.player.position.z - CONFIG.SPAWN_AHEAD : -CONFIG.SPAWN_AHEAD;
             while (this.lastObstacleZ > targetZ) this.advanceObstacleSpawn();
             while (this.lastTokenZ    > targetZ) this.advanceTokenSpawn();
@@ -1332,7 +1625,7 @@
                 new THREE.MeshStandardMaterial({
                     color: 0x0a0203,
                     emissive: 0xcc1133,
-                    emissiveIntensity: 0.65,    // was 1.4
+                    emissiveIntensity: 0.65,
                     metalness: 0.9,
                     roughness: 0.25,
                 })
@@ -1346,7 +1639,7 @@
                 new THREE.MeshStandardMaterial({
                     color: 0xff2244,
                     emissive: 0xff2244,
-                    emissiveIntensity: 1.8,    // was 3.5
+                    emissiveIntensity: 1.8,
                 })
             );
             strip.position.y = 1.05;
@@ -1436,7 +1729,7 @@
                 new THREE.MeshStandardMaterial({
                     color: 0xff00aa,
                     emissive: 0xff00aa,
-                    emissiveIntensity: 2.2,    // was 4.5
+                    emissiveIntensity: 2.2,
                 })
             );
             beam.position.y = 1.15;
@@ -1485,12 +1778,19 @@
         }
 
         addToken(x, y, z) {
+            // Skip if an obstacle is at this position
+            for (const o of this.obstacles) {
+                if (Math.abs(o.mesh.position.z - z) < 1.5 && Math.abs(o.mesh.position.x - x) < 1.5) {
+                    return;
+                }
+            }
+
             const m = new THREE.Mesh(
                 new THREE.OctahedronGeometry(0.32, 0),
                 new THREE.MeshStandardMaterial({
                     color: 0xffaa00,
                     emissive: 0xffaa00,
-                    emissiveIntensity: 1.0,    // was 2.2
+                    emissiveIntensity: 1.0,
                     metalness: 1,
                     roughness: 0.1,
                 })
@@ -1509,16 +1809,27 @@
 
         /* === Power-ups === */
         spawnPowerup(z) {
-            // 50/50 between time-stop and glitch
-            const type = Math.random() < 0.5 ? POWERUP_TYPE.TIMESTOP : POWERUP_TYPE.GLITCH;
-            const lane = Math.floor(Math.random() * 3);
+            // Distribution: TIMESTOP 25%, GLITCH 25%, MAGNET 25%, REWIND 12.5%, SHIELD 12.5%
+            const roll = Math.random();
+            let type;
+            if (roll < 0.25)      type = POWERUP_TYPE.TIMESTOP;
+            else if (roll < 0.50) type = POWERUP_TYPE.GLITCH;
+            else if (roll < 0.75) type = POWERUP_TYPE.MAGNET;
+            else if (roll < 0.875) type = POWERUP_TYPE.REWIND;
+            else                   type = POWERUP_TYPE.SHIELD;
 
+            const lane = Math.floor(Math.random() * 3);
             const group = new THREE.Group();
 
-            const isTimestop = type === POWERUP_TYPE.TIMESTOP;
-            const color = isTimestop ? 0x4080ff : 0xff00aa;
+            let color;
+            switch (type) {
+                case POWERUP_TYPE.TIMESTOP: color = 0x4080ff; break;
+                case POWERUP_TYPE.GLITCH:   color = 0xff00aa; break;
+                case POWERUP_TYPE.REWIND:   color = 0xaa00ff; break;
+                case POWERUP_TYPE.MAGNET:   color = 0x00cc88; break;
+                case POWERUP_TYPE.SHIELD:   color = 0xffcc00; break;
+            }
 
-            // Outer crystal — bigger & rotates
             const outer = new THREE.Mesh(
                 new THREE.OctahedronGeometry(0.5, 0),
                 new THREE.MeshStandardMaterial({
@@ -1534,16 +1845,12 @@
             outer.scale.set(1, 1.3, 1);
             group.add(outer);
 
-            // Inner core
             const inner = new THREE.Mesh(
                 new THREE.OctahedronGeometry(0.22, 0),
-                new THREE.MeshBasicMaterial({
-                    color: 0xffffff,
-                })
+                new THREE.MeshBasicMaterial({ color: 0xffffff })
             );
             group.add(inner);
 
-            // Rotating ring
             const ring = new THREE.Mesh(
                 new THREE.TorusGeometry(0.7, 0.04, 8, 24),
                 new THREE.MeshStandardMaterial({
@@ -1555,7 +1862,6 @@
             ring.rotation.x = Math.PI / 2;
             group.add(ring);
 
-            // Point light to make them pop without bloom blowout
             const light = new THREE.PointLight(color, 1.0, 6, 1.5);
             group.add(light);
 
@@ -1576,48 +1882,119 @@
         }
 
         activatePowerup(type) {
-            this.activePowerup = type;
-            this.powerupTimer = (type === POWERUP_TYPE.TIMESTOP)
-                ? CONFIG.TIMESTOP_DURATION
-                : CONFIG.GLITCH_DURATION;
-            this.powerupDuration = this.powerupTimer;
+            // Deactivate current timed powerup if any (including same type)
+            if (this.activePowerup) {
+                this.deactivatePowerup();
+            }
 
             const display = document.getElementById('powerup-display');
             const label   = document.getElementById('powerup-label');
             const fill    = document.getElementById('powerup-fill');
+            display.classList.remove('timestop', 'glitch', 'magnet');
 
-            display.classList.remove('timestop', 'glitch');
-            display.classList.add('show');
+            switch (type) {
+                case POWERUP_TYPE.TIMESTOP:
+                    this.activePowerup = type;
+                    this.powerupTimer = CONFIG.TIMESTOP_DURATION;
+                    this.powerupDuration = CONFIG.TIMESTOP_DURATION;
+                    this.timeStopSpeedStore = this.speed;
+                    this.speed = this.speed * 0.25;
+                    display.classList.add('show', 'timestop');
+                    label.textContent = 'TIME STOP';
+                    fill.style.width = '100%';
+                    document.getElementById('timestop-overlay').classList.add('active');
+                    this.showPowerupPopup('TIME STOP', '#80c0ff');
+                    break;
 
-            if (type === POWERUP_TYPE.TIMESTOP) {
-                display.classList.add('timestop');
-                label.textContent = 'TIME STOP';
-                document.getElementById('timestop-overlay').classList.add('active');
-                this.showPowerupPopup('TIME STOP', '#80c0ff');
-            } else {
-                display.classList.add('glitch');
-                label.textContent = 'GLITCH PHASE';
-                document.getElementById('glitch-overlay').classList.add('active');
-                this.glitchPass.enabled = true;
-                this.glitchPass.goWild = false;
-                this.showPowerupPopup('GLITCH PHASE', '#ff66cc');
+                case POWERUP_TYPE.GLITCH:
+                    this.activePowerup = type;
+                    this.powerupTimer = CONFIG.GLITCH_DURATION;
+                    this.powerupDuration = CONFIG.GLITCH_DURATION;
+                    display.classList.add('show', 'glitch');
+                    label.textContent = 'GLITCH PHASE';
+                    fill.style.width = '100%';
+                    document.getElementById('glitch-overlay').classList.add('active');
+                    this.glitchPass.enabled = true;
+                    this.glitchPass.goWild = false;
+                    this.showPowerupPopup('GLITCH PHASE', '#ff66cc');
+                    break;
+
+                case POWERUP_TYPE.MAGNET:
+                    this.activePowerup = type;
+                    this.magnetActive = true;
+                    this.powerupTimer = CONFIG.MAGNET_DURATION;
+                    this.powerupDuration = CONFIG.MAGNET_DURATION;
+                    display.classList.add('show', 'magnet');
+                    label.textContent = 'MAGNET';
+                    fill.style.width = '100%';
+                    document.getElementById('magnet-overlay').classList.add('active');
+                    this.showPowerupPopup('MAGNET', '#66ffcc');
+                    break;
+
+                case POWERUP_TYPE.REWIND:
+                    // Instant: saves checkpoint, no timer
+                    this.rewindCheckpoint = {
+                        lane: this.playerState.currentLane,
+                        z: this.player.position.z,
+                        score: this.score,
+                    };
+                    document.getElementById('rewind-overlay').classList.add('active');
+                    setTimeout(() => document.getElementById('rewind-overlay').classList.remove('active'), 800);
+                    this.showPowerupPopup('REWIND SET', '#cc66ff');
+                    break;
+
+                case POWERUP_TYPE.SHIELD:
+                    // Instant: grants shield
+                    this.shieldActive = true;
+                    this.shieldMesh.visible = true;
+                    document.getElementById('shield-overlay').classList.add('active');
+                    this.showPowerupPopup('SHIELD', '#ffdd44');
+                    break;
             }
-            fill.style.width = '100%';
         }
 
         deactivatePowerup() {
+            if (this.activePowerup === POWERUP_TYPE.TIMESTOP) {
+                // Restore speed
+                this.speed = this.timeStopSpeedStore || CONFIG.BASE_SPEED;
+                this.timeStopSpeedStore = 0;
+            }
+            if (this.activePowerup === POWERUP_TYPE.MAGNET) {
+                this.magnetActive = false;
+                document.getElementById('magnet-overlay').classList.remove('active');
+            }
+
             this.activePowerup = null;
             this.powerupTimer = 0;
             this.powerupDuration = 0;
 
-            document.getElementById('powerup-display').classList.remove('show');
+            document.getElementById('powerup-display').classList.remove('show', 'timestop', 'glitch', 'magnet');
             document.getElementById('timestop-overlay').classList.remove('active');
             document.getElementById('glitch-overlay').classList.remove('active');
 
-            // Don't disable glitch pass if death-glitch is still running
             if (this.glitchTriggerTimer <= 0) {
                 this.glitchPass.enabled = false;
                 this.glitchPass.goWild = false;
+            }
+        }
+
+        disposeMesh(obj) {
+            if (obj.geometry) obj.geometry.dispose();
+            if (obj.material) {
+                const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+                for (const m of materials) {
+                    if (m.map) m.map.dispose();
+                    if (m.normalMap) m.normalMap.dispose();
+                    if (m.roughnessMap) m.roughnessMap.dispose();
+                    if (m.metalnessMap) m.metalnessMap.dispose();
+                    if (m.emissiveMap) m.emissiveMap.dispose();
+                    m.dispose();
+                }
+            }
+            if (obj.children) {
+                for (const child of obj.children) {
+                    this.disposeMesh(child);
+                }
             }
         }
 
@@ -1630,6 +2007,21 @@
             void el.offsetWidth;
             el.classList.add('show');
             setTimeout(() => el.classList.remove('show'), 900);
+        }
+
+        showMilestone(text) {
+            const el = document.getElementById('milestone-popup');
+            el.textContent = text;
+            el.classList.remove('show');
+            void el.offsetWidth;
+            el.classList.add('show');
+            setTimeout(() => el.classList.remove('show'), 1200);
+
+            const flash = document.getElementById('milestone-flash');
+            flash.classList.remove('active');
+            void flash.offsetWidth;
+            flash.classList.add('active');
+            setTimeout(() => flash.classList.remove('active'), 800);
         }
 
         /* ============================================================
@@ -1651,6 +2043,7 @@
                     this.player.position.y = CONFIG.GROUND_Y;
                     this.playerState.velocityY = 0;
                     this.playerState.isGrounded = true;
+                    this.playerState.jumpCount = 0;
                     this.spawnParticles(
                         tmpVec.set(this.player.position.x, 0.05, this.player.position.z),
                         0x00ccdd, 6, 3
@@ -1659,6 +2052,19 @@
             }
 
             this.player.position.z -= this.speed * dt;
+
+            // Slide animation
+            if (this.isSliding) {
+                this.slideTimer -= dt;
+                this.playerBody.scale.set(1.3, 0.5, 1.3);
+                if (this.slideTimer <= 0) {
+                    this.isSliding = false;
+                    this.slideCooldown = CONFIG.SLIDE_COOLDOWN;
+                    this.playerBody.scale.set(1, 1.4, 1);
+                }
+            } else if (this.slideCooldown > 0) {
+                this.slideCooldown -= dt;
+            }
 
             // Glitch power-up: player visually flickers
             if (this.activePowerup === POWERUP_TYPE.GLITCH) {
@@ -1669,9 +2075,30 @@
                 this.playerBody.material.emissive.setHex(0x00bbcc);
             }
 
+            // Shield visual pulse
+            if (this.shieldActive && this.shieldMesh.visible) {
+                this.shieldMesh.rotation.y += dt * 2;
+                this.shieldMesh.material.opacity = 0.2 + Math.sin(this.elapsed * 6) * 0.08;
+            }
+
+            // Time stop particle trail
+            if (this.activePowerup === POWERUP_TYPE.TIMESTOP && Math.random() < 0.3) {
+                this.spawnParticles(
+                    tmpVec.set(
+                        this.player.position.x + (Math.random() - 0.5) * 0.5,
+                        this.player.position.y,
+                        this.player.position.z + 0.5
+                    ),
+                    0x4080ff, 1, 2
+                );
+            }
+
+            // Update player hitbox
+            const hitboxHeight = this.isSliding ? 0.5 : 1.1;
+            const hitboxY = this.isSliding ? this.player.position.y - 0.3 : this.player.position.y;
             this.playerBox.setFromCenterAndSize(
-                this.player.position,
-                tmpVec.set(0.85, 1.1, 0.85)
+                tmpVec.set(this.player.position.x, hitboxY, this.player.position.z),
+                tmpVec2.set(0.85, hitboxHeight, 0.85)
             );
         }
 
@@ -1685,6 +2112,7 @@
             for (let i = this.obstacles.length - 1; i >= 0; i--) {
                 const o = this.obstacles[i];
                 if (o.mesh.position.z > this.player.position.z + CONFIG.DESPAWN_BEHIND) {
+                    this.disposeMesh(o.mesh);
                     this.scene.remove(o.mesh);
                     this.obstacles.splice(i, 1);
                 }
@@ -1708,15 +2136,27 @@
                     t.mesh.scale.setScalar(s);
                     t.mesh.position.y += dt * 4;
                     if (t.collectAnim >= 1) {
+                        this.disposeMesh(t.mesh);
                         this.scene.remove(t.mesh);
                         this.tokensArr.splice(i, 1);
                         continue;
                     }
                 } else {
                     t.mesh.position.y = t.baseY + Math.sin(t.phase) * 0.12;
+
+                    // Magnet attraction
+                    if (this.magnetActive) {
+                        const dist = t.mesh.position.distanceTo(this.player.position);
+                        if (dist < CONFIG.MAGNET_RADIUS) {
+                            const dir = tmpVec.copy(this.player.position).sub(t.mesh.position).normalize();
+                            const pullSpeed = 12 * (1 - dist / CONFIG.MAGNET_RADIUS);
+                            t.mesh.position.addScaledVector(dir, pullSpeed * dt);
+                        }
+                    }
                 }
 
                 if (!t.collected && t.mesh.position.z > this.player.position.z + CONFIG.DESPAWN_BEHIND) {
+                    this.disposeMesh(t.mesh);
                     this.scene.remove(t.mesh);
                     this.tokensArr.splice(i, 1);
                     continue;
@@ -1751,6 +2191,7 @@
                     p.mesh.scale.setScalar(s);
                     p.mesh.position.y += dt * 4;
                     if (p.collectAnim >= 1) {
+                        this.disposeMesh(p.mesh);
                         this.scene.remove(p.mesh);
                         this.powerups.splice(i, 1);
                         continue;
@@ -1760,6 +2201,7 @@
                 }
 
                 if (!p.collected && p.mesh.position.z > this.player.position.z + CONFIG.DESPAWN_BEHIND) {
+                    this.disposeMesh(p.mesh);
                     this.scene.remove(p.mesh);
                     this.powerups.splice(i, 1);
                     continue;
@@ -1770,7 +2212,7 @@
                 }
             }
 
-            // Death-triggered glitch effect (separate from power-up glitch)
+            // Death-triggered glitch effect
             if (this.glitchTriggerTimer > 0) {
                 this.glitchTriggerTimer -= dt;
                 if (this.glitchTriggerTimer <= 0 && this.activePowerup !== POWERUP_TYPE.GLITCH) {
@@ -1781,16 +2223,24 @@
         }
 
         checkCollisions() {
-            // Obstacle collisions (skipped if glitch power-up active)
+            // Obstacle collisions
             for (const o of this.obstacles) {
                 if (this.playerBox.intersectsBox(o.box)) {
-                    if (this.activePowerup === POWERUP_TYPE.GLITCH) {
-                        // Phase through — small particle burst
-                        this.spawnParticles(o.mesh.position.clone(), 0xff00aa, 8, 4);
-                    } else {
-                        this.gameOver();
-                        return;
+                    // Time stop: obstacles cannot kill
+                    if (this.activePowerup === POWERUP_TYPE.TIMESTOP) {
+                        continue;
                     }
+                    // Glitch phase: phase through
+                    if (this.activePowerup === POWERUP_TYPE.GLITCH) {
+                        this.spawnParticles(o.mesh.position.clone(), 0xff00aa, 8, 4);
+                        continue;
+                    }
+                    // Slide under lasers
+                    if (this.isSliding && o.type === 'laser') {
+                        continue;
+                    }
+                    this.gameOver();
+                    return;
                 }
             }
             // Tokens
@@ -1801,7 +2251,7 @@
                     this.tokens++;
                     this.combo++;
                     this.comboTimer = 2.5;
-                    const value = CONFIG.TOKEN_VALUE * (1 + Math.floor(this.combo / 5));
+                    const value = CONFIG.TOKEN_VALUE * (1 + Math.floor(this.combo / 5)) * this.multiplier;
                     this.score += value;
                     this.shakeIntensity = Math.max(this.shakeIntensity, 0.16);
                     this.fovTarget = CONFIG.FOV_BASE - 2;
@@ -1866,9 +2316,19 @@
         }
 
         updateWorld(dt) {
+            // Recycle path segments
             for (const seg of this.pathSegments) {
                 if (seg.position.z > this.player.position.z + CONFIG.SEGMENT_LENGTH) {
                     seg.position.z -= CONFIG.SEGMENT_LENGTH * CONFIG.SEGMENT_COUNT;
+                }
+            }
+
+            // Recycle city buildings
+            for (const b of this.cityBuildings) {
+                if (b.position.z > this.player.position.z + CONFIG.CITY_RECYCLE_BEHIND) {
+                    // Move to far ahead
+                    b.position.z = this.player.position.z - CONFIG.CITY_SPAWN_AHEAD - Math.random() * 40;
+                    b.position.x = b.userData.side * (15 + Math.random() * 25);
                 }
             }
 
@@ -1891,7 +2351,16 @@
         }
 
         updateScore(dt) {
-            this.score += this.speed * dt * CONFIG.DISTANCE_MULT;
+            const distThisFrame = this.speed * dt * CONFIG.DISTANCE_MULT;
+            this.score += distThisFrame * this.multiplier;
+            this.distanceSinceLastMultiplier += distThisFrame;
+
+            // Increase multiplier every interval (capped)
+            if (this.distanceSinceLastMultiplier >= CONFIG.MULTIPLIER_GAIN_INTERVAL) {
+                this.distanceSinceLastMultiplier -= CONFIG.MULTIPLIER_GAIN_INTERVAL;
+                this.multiplier = Math.min(this.multiplier + CONFIG.MULTIPLIER_GAIN_AMOUNT, CONFIG.MULTIPLIER_MAX);
+            }
+
             if (this.comboTimer > 0) {
                 this.comboTimer -= dt;
                 if (this.comboTimer <= 0) this.combo = 0;
@@ -1899,15 +2368,33 @@
             document.getElementById('score-value').textContent = Math.floor(this.score);
             document.getElementById('token-value').textContent = this.tokens;
             document.getElementById('speed-value').textContent = this.speed.toFixed(1);
+            document.getElementById('multiplier-value').textContent = this.multiplier.toFixed(1);
         }
 
         updateDifficulty(dt) {
+            // Don't increase speed during time stop (it's already slowed)
+            if (this.activePowerup === POWERUP_TYPE.TIMESTOP) return;
+
             if (this.speed < CONFIG.MAX_SPEED) {
                 this.speed = Math.min(
                     CONFIG.MAX_SPEED,
                     this.speed + CONFIG.SPEED_GAIN_PER_SEC * dt
                 );
             }
+
+            // Milestone check
+            const currentMilestone = Math.floor(this.speed / CONFIG.MILESTONE_SPEED_INTERVAL) * CONFIG.MILESTONE_SPEED_INTERVAL;
+            const lastMilestone = Math.floor(this.lastMilestoneSpeed / CONFIG.MILESTONE_SPEED_INTERVAL) * CONFIG.MILESTONE_SPEED_INTERVAL;
+            if (currentMilestone > lastMilestone && currentMilestone > CONFIG.BASE_SPEED) {
+                const messages = ['VELOCITY SURGE', 'OVERDRIVE', 'HYPERSPEED', 'MACH BREACH', 'LIGHTSPEED'];
+                const idx = Math.min(
+                    messages.length - 1,
+                    Math.floor((currentMilestone - CONFIG.BASE_SPEED) / CONFIG.MILESTONE_SPEED_INTERVAL) - 1
+                );
+                this.showMilestone(messages[Math.max(0, idx)]);
+                this.shakeIntensity = Math.max(this.shakeIntensity, 0.4);
+            }
+            this.lastMilestoneSpeed = this.speed;
         }
 
         onResize() {
@@ -1924,29 +2411,11 @@
             requestAnimationFrame(() => this.animate());
             const dt = Math.min(0.05, this.clock.getDelta());
 
-            // TIME STOP: when active, freeze obstacle/spawning logic
-            // Player still moves forward + collects tokens/power-ups
-            const timestopActive = this.activePowerup === POWERUP_TYPE.TIMESTOP;
-
             if (this.state === STATE.PLAYING) {
                 this.elapsed += dt;
                 this.updatePlayer(dt);
-
-                if (!timestopActive) {
-                    // Normal flow: spawn + tick obstacles
-                    this.updateSpawning(dt);
-                    this.updateObstacles(dt);
-                } else {
-                    // Time stopped — only refresh boxes (no spawn, no despawn) so collisions still register if player drives into them
-                    for (const o of this.obstacles) {
-                        tmpVec.copy(o.mesh.position).add(o.offset);
-                        o.box.setFromCenterAndSize(tmpVec, o.size);
-                    }
-                    // Tokens & power-ups still spawn ahead so player can collect during slow-mo
-                    while (this.player.position.z - this.lastTokenZ   < CONFIG.SPAWN_AHEAD) this.advanceTokenSpawn();
-                    while (this.player.position.z - this.lastPowerupZ < CONFIG.SPAWN_AHEAD) this.advancePowerupSpawn();
-                }
-
+                this.updateSpawning(dt);
+                this.updateObstacles(dt);
                 this.updateTokens(dt);
                 this.updatePowerups(dt);
                 this.checkCollisions();
