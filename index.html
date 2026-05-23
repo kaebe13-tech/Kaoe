@@ -1332,6 +1332,12 @@
         }
 
         jump() {
+            if (this.isSliding) {
+                this.isSliding = false;
+                this.slideTimer = 0;
+                this.playerBody.scale.set(1, 1.4, 1);
+            }
+
             if (this.playerState.isGrounded) {
                 this.playerState.velocityY = CONFIG.JUMP_VELOCITY;
                 this.playerState.isGrounded = false;
@@ -1368,6 +1374,14 @@
         }
 
         gameOver() {
+            // Reset slide state
+            if (this.isSliding) {
+                this.isSliding = false;
+                this.slideTimer = 0;
+                this.slideCooldown = 0;
+                this.playerBody.scale.set(1, 1.4, 1);
+            }
+
             // Shield absorbs one hit
             if (this.shieldActive) {
                 this.shieldActive = false;
@@ -1408,6 +1422,12 @@
             this.timeStopSpeedStore = 0;
             this.deactivatePowerup();
 
+            this.magnetActive = false;
+            this.shieldActive = false;
+            this.shieldMesh.visible = false;
+            document.getElementById('magnet-overlay').classList.remove('active');
+            document.getElementById('shield-overlay').classList.remove('active');
+
             this.spawnParticles(this.player.position.clone(), 0xff2244, 35, 9);
             this.spawnParticles(this.player.position.clone(), 0xff8800, 18, 6);
         }
@@ -1436,6 +1456,7 @@
             this.isSliding = false;
             this.slideTimer = 0;
             this.slideCooldown = 0;
+            this.playerBody.scale.set(1, 1.4, 1);
 
             // Reset spawn cursors relative to checkpoint so spawning resumes normally
             this.lastObstacleZ = cp.z - 22;
@@ -1446,9 +1467,20 @@
             for (let i = this.obstacles.length - 1; i >= 0; i--) {
                 const o = this.obstacles[i];
                 const dist = Math.abs(o.mesh.position.z - cp.z);
-                if (dist < 20) {
+                if (dist < 30) {
+                    this.disposeMesh(o.mesh);
                     this.scene.remove(o.mesh);
                     this.obstacles.splice(i, 1);
+                }
+            }
+            // Also remove nearby tokens to prevent confusion
+            for (let i = this.tokensArr.length - 1; i >= 0; i--) {
+                const t = this.tokensArr[i];
+                const dist = Math.abs(t.mesh.position.z - cp.z);
+                if (dist < 10) {
+                    this.disposeMesh(t.mesh);
+                    this.scene.remove(t.mesh);
+                    this.tokensArr.splice(i, 1);
                 }
             }
         }
@@ -1456,11 +1488,11 @@
         resetGame() {
             this.state = STATE.RESET;
 
-            for (const o of this.obstacles) this.scene.remove(o.mesh);
+            for (const o of this.obstacles) { this.disposeMesh(o.mesh); this.scene.remove(o.mesh); }
             this.obstacles.length = 0;
-            for (const t of this.tokensArr) this.scene.remove(t.mesh);
+            for (const t of this.tokensArr) { this.disposeMesh(t.mesh); this.scene.remove(t.mesh); }
             this.tokensArr.length = 0;
-            for (const p of this.powerups) this.scene.remove(p.mesh);
+            for (const p of this.powerups) { this.disposeMesh(p.mesh); this.scene.remove(p.mesh); }
             this.powerups.length = 0;
             for (const p of this.particlePool) {
                 p.userData.active = false;
@@ -1741,6 +1773,13 @@
         }
 
         addToken(x, y, z) {
+            // Skip if an obstacle is at this position
+            for (const o of this.obstacles) {
+                if (Math.abs(o.mesh.position.z - z) < 1.5 && Math.abs(o.mesh.position.x - x) < 1.5) {
+                    return;
+                }
+            }
+
             const m = new THREE.Mesh(
                 new THREE.OctahedronGeometry(0.32, 0),
                 new THREE.MeshStandardMaterial({
@@ -1838,8 +1877,8 @@
         }
 
         activatePowerup(type) {
-            // Deactivate current timed powerup if any
-            if (this.activePowerup && this.activePowerup !== type) {
+            // Deactivate current timed powerup if any (including same type)
+            if (this.activePowerup) {
                 this.deactivatePowerup();
             }
 
@@ -1924,13 +1963,29 @@
             this.powerupTimer = 0;
             this.powerupDuration = 0;
 
-            document.getElementById('powerup-display').classList.remove('show');
+            document.getElementById('powerup-display').classList.remove('show', 'timestop', 'glitch', 'magnet');
             document.getElementById('timestop-overlay').classList.remove('active');
             document.getElementById('glitch-overlay').classList.remove('active');
 
             if (this.glitchTriggerTimer <= 0) {
                 this.glitchPass.enabled = false;
                 this.glitchPass.goWild = false;
+            }
+        }
+
+        disposeMesh(obj) {
+            if (obj.geometry) obj.geometry.dispose();
+            if (obj.material) {
+                if (Array.isArray(obj.material)) {
+                    obj.material.forEach(m => m.dispose());
+                } else {
+                    obj.material.dispose();
+                }
+            }
+            if (obj.children) {
+                for (const child of obj.children) {
+                    this.disposeMesh(child);
+                }
             }
         }
 
@@ -2048,6 +2103,7 @@
             for (let i = this.obstacles.length - 1; i >= 0; i--) {
                 const o = this.obstacles[i];
                 if (o.mesh.position.z > this.player.position.z + CONFIG.DESPAWN_BEHIND) {
+                    this.disposeMesh(o.mesh);
                     this.scene.remove(o.mesh);
                     this.obstacles.splice(i, 1);
                 }
@@ -2071,6 +2127,7 @@
                     t.mesh.scale.setScalar(s);
                     t.mesh.position.y += dt * 4;
                     if (t.collectAnim >= 1) {
+                        this.disposeMesh(t.mesh);
                         this.scene.remove(t.mesh);
                         this.tokensArr.splice(i, 1);
                         continue;
@@ -2090,6 +2147,7 @@
                 }
 
                 if (!t.collected && t.mesh.position.z > this.player.position.z + CONFIG.DESPAWN_BEHIND) {
+                    this.disposeMesh(t.mesh);
                     this.scene.remove(t.mesh);
                     this.tokensArr.splice(i, 1);
                     continue;
@@ -2124,6 +2182,7 @@
                     p.mesh.scale.setScalar(s);
                     p.mesh.position.y += dt * 4;
                     if (p.collectAnim >= 1) {
+                        this.disposeMesh(p.mesh);
                         this.scene.remove(p.mesh);
                         this.powerups.splice(i, 1);
                         continue;
@@ -2133,6 +2192,7 @@
                 }
 
                 if (!p.collected && p.mesh.position.z > this.player.position.z + CONFIG.DESPAWN_BEHIND) {
+                    this.disposeMesh(p.mesh);
                     this.scene.remove(p.mesh);
                     this.powerups.splice(i, 1);
                     continue;

@@ -1,0 +1,43 @@
+{
+  "id": "FEAT-001",
+  "type": "fix",
+  "description": "Fix all identified bugs in the NEON DRIFT game. This is a comprehensive bug-fix pass covering power-up state management, collision logic, spawning, memory leaks, and state transitions.",
+  "status": "in_progress",
+  "steps": [
+    "1. FIX TIME STOP SPEED RESTORATION BUG (Critical): In `activatePowerup()` for TIMESTOP case, when activating time stop while it's already active, the condition `this.activePowerup && this.activePowerup !== type` is FALSE (same type), so `deactivatePowerup()` is NOT called first. Then `this.timeStopSpeedStore = this.speed` stores the ALREADY REDUCED speed. When the powerup expires, it restores to the reduced speed permanently. FIX: When activating any powerup of the same type that's already active, still call deactivatePowerup() first OR specifically for TIMESTOP, don't overwrite timeStopSpeedStore if it already has a value (i.e., only store if not already in time stop). Change the condition at the top of activatePowerup to just `if (this.activePowerup) { this.deactivatePowerup(); }` to always deactivate before reactivating.",
+    "2. FIX POWERUP DISPLAY CSS CLASS CLEANUP: In `deactivatePowerup()`, after removing 'show' class, also remove 'timestop', 'glitch', 'magnet' classes from the powerup-display element to prevent stale class accumulation.",
+    "3. FIX OBSTACLE/TOKEN SPAWN OVERLAP: In `spawnObstacleRow()`, record which lanes are blocked. In `spawnTokenGroup()`, avoid spawning tokens at the exact same Z as recent obstacles. Add a small Z offset check or lane avoidance. The simplest fix: in `spawnTokenGroup`, offset the token Z slightly from obstacle positions, OR add a check that tokens don't spawn within 2 units of Z of the most recent obstacle row.",
+    "4. FIX MEMORY LEAK - DISPOSE GEOMETRIES AND MATERIALS: When removing obstacles, tokens, and powerups from the scene (in updateObstacles, updateTokens, updatePowerups, and resetGame), call `.traverse()` on the mesh to dispose geometry and material of each child. Add a helper method `disposeMesh(obj)` that traverses and disposes.",
+    "5. FIX GAME OVER GLITCH EFFECT NOT CLEARING: After game over, the glitch effect timer (`glitchTriggerTimer = 0.6`) should count down. In the GAME_OVER state in animate(), `updatePowerups(dt)` IS called which does decrement glitchTriggerTimer. However, if the player resets quickly (within 0.6s), the `resetGame()` sets `this.glitchTriggerTimer = 0` and disables glitch pass. This is already handled. But verify that calling `resetGame()` during the glitch effect properly cleans up.",
+    "6. FIX REWIND CHECKPOINT EDGE CASES: (a) After rewind, obstacles that were spawned beyond the 20-unit cleanup radius could still exist in front of the player. Fix: remove ALL obstacles that are between the player's new position and some safe distance ahead (e.g., 30 units ahead). (b) Also clear tokens and powerups in the immediate vicinity to prevent instant re-collection issues.",
+    "7. FIX SLIDE STATE NOT RESETTING ON GAME OVER: If the player dies while sliding, `isSliding` remains true. The `gameOver()` function doesn't reset slide state. When rewind triggers or game resets, the body scale might be wrong. FIX: Add slide state reset in `gameOver()` before the rewind check, and ensure `playerBody.scale` is restored.",
+    "8. FIX PLAYER BODY SCALE NOT RESTORED AFTER REWIND DURING SLIDE: In `triggerRewind()`, `isSliding` is reset to false and slideTimer to 0, but `playerBody.scale` is not explicitly restored. Add `this.playerBody.scale.set(1, 1.4, 1)` in triggerRewind.",
+    "9. FIX JUMP DURING SLIDE: Currently if the player presses jump during a slide, the jump executes (isGrounded is true during slide). This should either cancel the slide and jump, or be prevented. FIX: If jumping during a slide, cancel the slide first (restore scale, reset slide state) then jump normally.",
+    "10. FIX DOUBLE JUMP COUNTER NOT RESET ON REWIND: In triggerRewind(), jumpCount is set to 0 which is correct. Verified.",
+    "11. FIX TOKEN COLLECTION DURING GAME OVER: In GAME_OVER state, `updateTokens` is called which includes magnet logic and animation, but `checkCollisions` is NOT called so tokens can't be collected. This is correct. No fix needed.",
+    "12. FIX POWERUP TIMER STILL COUNTING DURING GAME OVER: In GAME_OVER state, `updatePowerups(dt)` is called which decrements `powerupTimer` and can call `deactivatePowerup()`. If time stop was active at death, `gameOver()` already called deactivatePowerup. But if GLITCH or MAGNET was active, they'd deactivate naturally during game over via the timer. This could cause UI artifacts (overlay classes toggling). FIX: In gameOver(), clear ALL active powerup state explicitly.",
+    "13. FIX HUD NOT UPDATING BEST SCORE DURING GAME: The best-score HUD element is only updated on game over. It should also show during gameplay if the current score exceeds best. This is minor - the current design updates it on game over which is acceptable.",
+    "14. FIX SPAWNING AHEAD DISTANCE CHECK: Verify the spawning while-loop condition handles the player moving in negative Z correctly. Player.position.z goes negative. lastObstacleZ also goes negative (more negative = further ahead). `player.position.z - lastObstacleZ` when player=-100 and lastObs=-120 = 20, which is < 110, so more obstacles spawn. When lastObs=-210, result = 110, loop stops. This is correct.",
+    "15. FIX SHIELD OVERLAY NOT CLEARED ON RESET: In resetGame(), `document.getElementById('shield-overlay').classList.remove('active')` IS called. Verified this is handled."
+  ],
+  "acceptance_criteria": [
+    "Extracting the JS from the HTML and running node --check shows no syntax errors",
+    "The time stop speed restoration bug is fixed - collecting time stop while already in time stop properly preserves the original full speed",
+    "The deactivatePowerup function properly cleans up all CSS classes",
+    "Memory leaks are addressed with proper disposal of Three.js objects",
+    "Rewind clears a wider area of obstacles for safety",
+    "Slide state is properly managed across all state transitions (game over, rewind, reset)",
+    "Power-up state is fully cleared on game over to prevent timer artifacts",
+    "Jump during slide properly cancels the slide"
+  ],
+  "verification": [
+    "Extract JS from HTML into a temp file and run node --check to verify syntax",
+    "Review the activatePowerup TIMESTOP case to confirm timeStopSpeedStore is only set from the unreduced speed",
+    "Review deactivatePowerup to confirm CSS class cleanup",
+    "Review disposeMesh helper and its usage in removal code",
+    "Review triggerRewind to confirm obstacle clearing radius and body scale restoration",
+    "Review gameOver to confirm slide state reset and full powerup cleanup"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
