@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neon Runner - Cyberpunk Endless Runner</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Courier New', monospace;
+            overflow: hidden;
+            background: #000;
+        }
+
+        #gameCanvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #0ff;
+            font-size: 24px;
+            text-shadow: 0 0 10px #0ff, 0 0 20px #0ff;
+            z-index: 100;
+            pointer-events: none;
+        }
+
+        #score, #tokens {
+            margin-bottom: 10px;
+        }
+
+        #gameOver {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #f0f;
+            font-size: 48px;
+            text-shadow: 0 0 20px #f0f, 0 0 40px #f0f;
+            display: none;
+            z-index: 200;
+        }
+
+        #gameOver h1 {
+            margin-bottom: 20px;
+            font-size: 72px;
+        }
+
+        #gameOver p {
+            margin-bottom: 30px;
+            font-size: 32px;
+        }
+
+        #restartBtn {
+            padding: 15px 40px;
+            font-size: 28px;
+            background: linear-gradient(45deg, #f0f, #0ff);
+            border: 3px solid #fff;
+            color: #000;
+            font-weight: bold;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            text-transform: uppercase;
+            box-shadow: 0 0 20px #f0f, 0 0 40px #0ff;
+            pointer-events: auto;
+            transition: all 0.3s;
+        }
+
+        #restartBtn:hover {
+            transform: scale(1.1);
+            box-shadow: 0 0 30px #f0f, 0 0 60px #0ff;
+        }
+
+        #instructions {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #0ff;
+            font-size: 16px;
+            text-shadow: 0 0 5px #0ff;
+            text-align: center;
+            z-index: 100;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div id="score">DISTANCE: <span id="scoreValue">0</span></div>
+        <div id="tokens">TOKENS: <span id="tokenValue">0</span></div>
+    </div>
+
+    <div id="gameOver">
+        <h1>GAME OVER</h1>
+        <p>DISTANCE: <span id="finalScore">0</span></p>
+        <p>TOKENS: <span id="finalTokens">0</span></p>
+        <button id="restartBtn">RESTART</button>
+    </div>
+
+    <div id="instructions">
+        ← → or A D: SWITCH LANES | ↑ or W or SPACE: JUMP
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+        }
+    }
+    </script>
+    <script type="module" src="game.js"></script>
+</body>
+</html>
