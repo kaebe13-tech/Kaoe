@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "Fix all identified bugs in the NEON DRIFT game. This is a comprehensive bug-fix pass covering power-up state management, collision logic, spawning, memory leaks, and state transitions.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "1. FIX TIME STOP SPEED RESTORATION BUG (Critical): In `activatePowerup()` for TIMESTOP case, when activating time stop while it's already active, the condition `this.activePowerup && this.activePowerup !== type` is FALSE (same type), so `deactivatePowerup()` is NOT called first. Then `this.timeStopSpeedStore = this.speed` stores the ALREADY REDUCED speed. When the powerup expires, it restores to the reduced speed permanently. FIX: When activating any powerup of the same type that's already active, still call deactivatePowerup() first OR specifically for TIMESTOP, don't overwrite timeStopSpeedStore if it already has a value (i.e., only store if not already in time stop). Change the condition at the top of activatePowerup to just `if (this.activePowerup) { this.deactivatePowerup(); }` to always deactivate before reactivating.",
     "2. FIX POWERUP DISPLAY CSS CLASS CLEANUP: In `deactivatePowerup()`, after removing 'show' class, also remove 'timestop', 'glitch', 'magnet' classes from the powerup-display element to prevent stale class accumulation.",
@@ -39,5 +39,5 @@
     "Review gameOver to confirm slide state reset and full powerup cleanup"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 9 bugs fixed and verified with node --check syntax validation. No pre-existing test failures since the project has no automated tests. The disposeMesh helper recursively traverses children for proper cleanup."
 }
