@@ -1,0 +1,7 @@
+{
+  "task_id": "task-fix-and-enhance-neon-drift",
+  "task_description": "Fix all bugs in the NEON DRIFT cyberpunk endless runner game and add significant new features including proper time stop/slow-motion, time rewind, magnet, shield power-ups, slide/duck mechanic, double jump, score multiplier, and difficulty milestones.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null
+}

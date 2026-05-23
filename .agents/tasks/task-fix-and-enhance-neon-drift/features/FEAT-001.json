@@ -1,0 +1,47 @@
+{
+  "id": "FEAT-001",
+  "type": "fix",
+  "description": "Fix all bugs in the game and enhance core mechanics with new power-ups (time rewind, magnet, shield), add slide/duck mechanic, double jump, score multiplier, and improve time stop to be a proper slow-motion effect. Also add city building recycling and other missing functionality.",
+  "status": "in_progress",
+  "steps": [
+    "STEP 1 - Fix truncated playerBox.setFromCenterAndSize call around line 1672. The line reads 'this.playerBox.setFromCe' and is cut off. Complete it properly.",
+    "STEP 2 - Add CSS for #hud.hidden (display:none or opacity:0 + pointer-events:none) since the JS toggles this class but no CSS rule exists for it.",
+    "STEP 3 - Fix city buildings never recycling: In updateWorld(), add logic to reposition buildings that are far behind the player to a position far ahead (similar to path segments).",
+    "STEP 4 - Fix best-score-menu not updating after game over. In gameOver() or resetGame(), update document.getElementById('best-score-menu').textContent.",
+    "STEP 5 - Fix Time Stop power-up: Change it from 'freeze spawning' to a proper slow-motion effect. When TIME STOP is active: reduce game speed to 25% of current speed (store original speed, restore after), slow obstacle movement visually, add particle trail behind player showing time distortion, and keep the blue overlay. Player still controls at normal responsiveness but the world crawls. Obstacles should NOT kill during time stop (they are 'frozen in time'). Resume normal speed when it expires.",
+    "STEP 6 - Add Time Rewind power-up (new POWERUP_TYPE.REWIND): Purple/violet colored crystal. When collected, it saves the current position/lane/score as a checkpoint. The NEXT time the player would die (hits an obstacle), instead of game over, they rewind to the saved checkpoint position (with a cool rewind visual effect - brief screen flash, particles). Only one rewind per pickup. Add to POWERUP_TYPE enum, add spawn logic (rotate between 3 power-up types), add checkpoint save/restore logic, add purple overlay CSS, add rewind activation visual.",
+    "STEP 7 - Add Magnet power-up (new POWERUP_TYPE.MAGNET): Green/teal colored crystal. When active for 5 seconds, all tokens within a larger radius (say 8 units) are attracted toward the player automatically. Update token update logic to lerp tokens toward player position when magnet is active. Add green overlay CSS and HUD bar.",
+    "STEP 8 - Add Shield power-up (new POWERUP_TYPE.SHIELD): Gold/yellow colored crystal. Grants one-hit protection (absorbs next obstacle collision without dying). Visual: golden glow around player, shield mesh (translucent sphere). When hit, shield breaks with particle explosion and player continues. Different from Glitch because shield is a single-hit absorb, not timed invincibility.",
+    "STEP 9 - Add Slide/Duck mechanic: Bind S key and Down Arrow to a slide action. When sliding, player hitbox shrinks vertically (flatten the player), allowing them to pass under laser beams (which are positioned at y=1.15). Slide lasts ~0.6 seconds with a cooldown. Add slide animation (squash player mesh). Update collision: if player is sliding and obstacle is a laser type, skip collision.",
+    "STEP 10 - Add Double Jump: Allow one additional jump while airborne. Track jump count in playerState. First jump from ground works normally. If player presses jump again while airborne and hasnt used double jump, apply another upward velocity boost (slightly less than first jump). Reset double jump on landing. Add a small particle burst on double jump.",
+    "STEP 11 - Add Score Multiplier system: Track a multiplier that increases based on distance traveled without hitting anything. Display multiplier in HUD (e.g., x1.5, x2.0). Multiplier increases by 0.1 every 500m survived. Resets on death. Apply multiplier to distance score accumulation.",
+    "STEP 12 - Add difficulty milestone visual feedback: At speed thresholds (every 5 units of speed gained), briefly flash the screen edges with a color pulse and show text like 'VELOCITY SURGE' or 'OVERDRIVE'. Add CSS for the flash effect. Track last milestone speed.",
+    "STEP 13 - Ensure all power-up types (TIME STOP, GLITCH, REWIND, MAGNET, SHIELD) are properly spawned with appropriate rarity. Time Stop and Glitch: common. Rewind and Shield: uncommon. Magnet: common. Adjust spawn probabilities.",
+    "STEP 14 - Update the start menu legend to show all power-up types with their colors (blue=time stop, pink=glitch, purple=rewind, green=magnet, gold=shield).",
+    "STEP 15 - Add the multiplier display to the HUD (new hud-panel on the left side showing 'MULTIPLIER' with the current value).",
+    "STEP 16 - Ensure the game runs without any JavaScript errors. Verify all DOM element references exist, all methods are properly defined, all power-up state transitions work correctly (activate/deactivate for each type), and the game loop handles all states properly."
+  ],
+  "acceptance_criteria": [
+    "Game loads without any JavaScript console errors",
+    "Player can move left/right between 3 lanes, jump, double-jump, and slide",
+    "Time Stop power-up creates a slow-motion effect where world speed drops to 25% and obstacles cannot kill",
+    "Time Rewind power-up saves a checkpoint and revives player on next death",
+    "Magnet power-up attracts nearby tokens to the player",
+    "Shield power-up absorbs one hit",
+    "Glitch Phase power-up grants timed invincibility (existing, still works)",
+    "Slide mechanic allows passing under laser obstacles",
+    "Score multiplier increases over time and displays in HUD",
+    "City buildings recycle as player progresses (no empty background)",
+    "All HUD elements update correctly",
+    "Best score persists across sessions via localStorage",
+    "Game over and restart work cleanly without leftover state"
+  ],
+  "verification": [
+    "Extract the JavaScript from the HTML file and run it through node --check or esbuild to verify no syntax errors",
+    "Verify all DOM getElementById calls reference elements that exist in the HTML",
+    "Verify all class methods referenced in the game loop (animate) are defined",
+    "Check that power-up state machine handles all transitions (activate each type, deactivate, handle overlap)"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

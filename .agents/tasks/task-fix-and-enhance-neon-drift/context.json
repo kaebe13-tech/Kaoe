@@ -1,0 +1,16 @@
+{
+  "project_type": "Single-file HTML5 game using Three.js with ES modules (importmap)",
+  "language": "JavaScript (ES modules via importmap), HTML, CSS",
+  "build_system": "None - single HTML file served directly, uses CDN imports",
+  "test_framework": "None - manual browser testing, can validate with static analysis",
+  "build_command": "N/A - single HTML file",
+  "test_command": "Open index.html in browser or use node to syntax-check the JS",
+  "verification_instructions": "1. Validate HTML structure is well-formed. 2. Extract and syntax-check JS with node --check or esbuild parse. 3. Verify no undefined references or obvious logic errors via code review.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "No setup needed - single self-contained HTML file with CDN dependencies",
+  "environment_constraints": "Open internet available. Node.js 22 available for JS syntax validation.",
+  "contribution_requirements": "Single HTML file - all changes go into /projects/sandbox/Kaoe/index.html",
+  "key_patterns": "Game uses a class-based architecture (NeonDriftGame). Three.js r160 with EffectComposer post-processing. CONFIG object for tuning. STATE enum for game states. Player moves in negative Z direction. Lane-based movement with 3 lanes. Power-ups use POWERUP_TYPE enum. Particles use object pool pattern. Box3 collision detection.",
+  "relevant_files": ["/projects/sandbox/Kaoe/index.html"],
+  "directory_structure": "Single file project: /projects/sandbox/Kaoe/index.html contains all HTML, CSS, and JS"
+}
