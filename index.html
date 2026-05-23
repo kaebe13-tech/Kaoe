@@ -779,6 +779,7 @@
 
         MULTIPLIER_GAIN_INTERVAL: 500,
         MULTIPLIER_GAIN_AMOUNT:   0.1,
+        MULTIPLIER_MAX:           5.0,
 
         MILESTONE_SPEED_INTERVAL: 5,
 
@@ -844,9 +845,6 @@
             this.isSliding = false;
             this.slideTimer = 0;
             this.slideCooldown = 0;
-
-            // Double jump
-            this.doubleJumpUsed = false;
 
             // Score multiplier
             this.multiplier = 1.0;
@@ -1370,11 +1368,6 @@
         }
 
         gameOver() {
-            // Glitch phase: invincible
-            if (this.activePowerup === POWERUP_TYPE.GLITCH) return;
-            // Time Stop: obstacles frozen, cannot kill
-            if (this.activePowerup === POWERUP_TYPE.TIMESTOP) return;
-
             // Shield absorbs one hit
             if (this.shieldActive) {
                 this.shieldActive = false;
@@ -1411,6 +1404,8 @@
             this.glitchPass.enabled = true;
             this.glitchPass.goWild = true;
 
+            // Clear stored speed so deactivatePowerup does not restore it in GAME_OVER state
+            this.timeStopSpeedStore = 0;
             this.deactivatePowerup();
 
             this.spawnParticles(this.player.position.clone(), 0xff2244, 35, 9);
@@ -1440,6 +1435,12 @@
             this.playerState.jumpCount = 0;
             this.isSliding = false;
             this.slideTimer = 0;
+            this.slideCooldown = 0;
+
+            // Reset spawn cursors relative to checkpoint so spawning resumes normally
+            this.lastObstacleZ = cp.z - 22;
+            this.lastTokenZ = cp.z - 14;
+            this.lastPowerupZ = cp.z - 45;
 
             // Remove nearby obstacles to give breathing room
             for (let i = this.obstacles.length - 1; i >= 0; i--) {
@@ -1488,7 +1489,6 @@
             this.isSliding = false;
             this.slideTimer = 0;
             this.slideCooldown = 0;
-            this.doubleJumpUsed = false;
             this.multiplier = 1.0;
             this.distanceSinceLastMultiplier = 0;
             this.lastMilestoneSpeed = CONFIG.BASE_SPEED;
@@ -2085,7 +2085,6 @@
                             const dir = tmpVec.copy(this.player.position).sub(t.mesh.position).normalize();
                             const pullSpeed = 12 * (1 - dist / CONFIG.MAGNET_RADIUS);
                             t.mesh.position.addScaledVector(dir, pullSpeed * dt);
-                            t.baseY = t.mesh.position.y;
                         }
                     }
                 }
@@ -2287,10 +2286,10 @@
             this.score += distThisFrame * this.multiplier;
             this.distanceSinceLastMultiplier += distThisFrame;
 
-            // Increase multiplier every interval
+            // Increase multiplier every interval (capped)
             if (this.distanceSinceLastMultiplier >= CONFIG.MULTIPLIER_GAIN_INTERVAL) {
                 this.distanceSinceLastMultiplier -= CONFIG.MULTIPLIER_GAIN_INTERVAL;
-                this.multiplier += CONFIG.MULTIPLIER_GAIN_AMOUNT;
+                this.multiplier = Math.min(this.multiplier + CONFIG.MULTIPLIER_GAIN_AMOUNT, CONFIG.MULTIPLIER_MAX);
             }
 
             if (this.comboTimer > 0) {
