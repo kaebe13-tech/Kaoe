@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Clear, practical website and local visibility audits plus one-page landing page builds.">
+  <title>Signal &amp; Structure — Clearer Pages. Better Next Steps.</title>
+  <style>
+    :root { --ink:#10201d; --muted:#55645f; --paper:#f7f6f0; --card:#fffefa; --line:#d8ddd4; --lime:#d8ef5c; --teal:#12655d; --dark:#0c2925; --radius:22px; }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body { margin:0; color:var(--ink); background:var(--paper); font:16px/1.55 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    a { color:inherit; }
+    a:focus-visible, button:focus-visible { outline:3px solid var(--teal); outline-offset:4px; }
+    .wrap { width:min(1120px, calc(100% - 40px)); margin:auto; }
+    header { padding:24px 0; }
+    nav { display:flex; align-items:center; justify-content:space-between; gap:20px; }
+    .brand { text-decoration:none; font-weight:800; letter-spacing:-.04em; font-size:1.15rem; }
+    .brand span { color:var(--teal); }
+    .nav-link { font-size:.92rem; font-weight:700; text-decoration:none; border-bottom:1px solid currentColor; }
+    .hero { padding:68px 0 82px; display:grid; grid-template-columns:1.15fr .85fr; gap:52px; align-items:end; }
+    .eyebrow { margin:0 0 18px; color:var(--teal); text-transform:uppercase; letter-spacing:.13em; font-size:.74rem; font-weight:800; }
+    h1, h2, h3 { line-height:1; letter-spacing:-.055em; margin:0; }
+    h1 { font-size:clamp(3.2rem, 8vw, 6.9rem); max-width:780px; }
+    h1 em { font-style:normal; color:var(--teal); }
+    .lede { margin:26px 0 0; max-width:560px; color:var(--muted); font-size:1.12rem; }
+    .hero-mark { padding:30px; border-radius:var(--radius); background:var(--dark); color:white; min-height:250px; display:flex; flex-direction:column; justify-content:space-between; }
+    .hero-mark strong { color:var(--lime); font-size:2.4rem; line-height:.9; letter-spacing:-.08em; }
+    .hero-mark p { margin:0; max-width:250px; color:#dce5df; font-size:.93rem; }
+    .band { background:var(--lime); padding:17px 0; overflow:hidden; }
+    .ticker { white-space:nowrap; text-transform:uppercase; font-size:.77rem; font-weight:800; letter-spacing:.12em; }
+    section { padding:92px 0; }
+    .section-head { display:grid; grid-template-columns:.7fr 1.3fr; gap:36px; margin-bottom:36px; }
+    h2 { font-size:clamp(2.25rem, 5vw, 4.4rem); }
+    .section-head p { margin:8px 0 0; color:var(--muted); max-width:570px; }
+    .grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; }
+    .service { background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:27px; display:flex; flex-direction:column; min-height:410px; }
+    .number { color:var(--teal); font-weight:800; font-size:.78rem; letter-spacing:.1em; }
+    .service h3 { margin:30px 0 12px; font-size:1.75rem; }
+    .service > p { color:var(--muted); margin:0; }
+    .price { margin-top:auto; padding-top:28px; display:flex; align-items:end; justify-content:space-between; gap:10px; }
+    .price strong { font-size:2.2rem; letter-spacing:-.07em; }
+    .price span { font-size:.82rem; color:var(--muted); text-align:right; }
+    .details { background:var(--dark); color:white; }
+    .details .section-head p { color:#c5d2cc; }
+    .detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:1px; background:#31504a; border:1px solid #31504a; border-radius:var(--radius); overflow:hidden; }
+    .detail { background:var(--dark); padding:29px; }
+    .detail h3 { font-size:1.25rem; margin-bottom:14px; }
+    .detail ul { margin:0; padding-left:1.1rem; color:#d7e1dc; }
+    .detail li + li { margin-top:8px; }
+    .process { display:grid; grid-template-columns:repeat(3, 1fr); gap:24px; }
+    .step { border-top:2px solid var(--ink); padding-top:15px; }
+    .step span { color:var(--teal); font-weight:800; font-size:.8rem; }
+    .step h3 { font-size:1.28rem; margin:12px 0 8px; }
+    .step p { color:var(--muted); margin:0; }
+    .cta { padding:56px; border-radius:var(--radius); background:var(--teal); color:white; display:flex; justify-content:space-between; align-items:end; gap:30px; }
+    .cta h2 { max-width:660px; }
+    .cta p { max-width:440px; color:#ddf3ef; margin:14px 0 0; }
+    .actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; }
+    .button { display:inline-block; flex:none; background:var(--lime); color:var(--ink); border-radius:999px; padding:14px 20px; font-weight:800; text-decoration:none; white-space:nowrap; }
+    .button.secondary { background:transparent; color:white; border:1px solid #b8ddd7; }
+    footer { padding:30px 0 42px; color:var(--muted); font-size:.86rem; display:flex; justify-content:space-between; gap:20px; }
+    @media (max-width:780px) { .hero, .section-head { grid-template-columns:1fr; } .hero { padding:45px 0 62px; gap:32px; } .grid, .process { grid-template-columns:1fr; } .detail-grid { grid-template-columns:1fr; } .cta { padding:32px; display:block; } .actions { justify-content:flex-start; margin-top:24px; } }
+    @media (max-width:460px) { .wrap { width:min(100% - 28px, 1120px); } h1 { font-size:3.25rem; } .hero-mark { min-height:190px; } section { padding:64px 0; } footer { display:block; } }
+  </style>
+</head>
+<body>
+  <header class="wrap">
+    <nav aria-label="Main navigation">
+      <a class="brand" href="#top">SIGNAL <span>&amp;</span> STRUCTURE</a>
+      <a class="nav-link" href="#services">View services</a>
+    </nav>
+  </header>
+  <main id="top">
+    <div class="wrap hero">
+      <div>
+        <p class="eyebrow">Practical web clarity for small businesses</p>
+        <h1>Make your next step <em>obvious.</em></h1>
+        <p class="lede">Straightforward audits and focused landing pages for businesses that want a clearer online presence—without a long agency process.</p>
+      </div>
+      <aside class="hero-mark" aria-label="Service promise">
+        <strong>24H<br>TURNAROUND</strong>
+        <p>Clear deliverables. Original work. A focused recommendation or page you can use right away.</p>
+      </aside>
+    </div>
+    <div class="band" aria-hidden="true"><div class="wrap ticker">Clarity over clutter · Mobile-first thinking · Original work · No inflated promises · Clarity over clutter · Mobile-first thinking · Original work · No inflated promises</div></div>
+    <section class="wrap" id="services" aria-labelledby="services-title">
+      <div class="section-head"><h2 id="services-title">Pick the useful next move.</h2><p>Each service is scoped to be decisive and actionable. You receive a concise result, not a vague pile of ideas.</p></div>
+      <div class="grid">
+        <article class="service"><span class="number">01 / AUDIT</span><h3>Landing-page clarity &amp; conversion audit</h3><p>A review of one public landing page focused on message clarity, page flow, calls to action, trust gaps, and mobile friction.</p><div class="price"><strong>$65</strong><span>Written audit<br>within 24 hours</span></div></article>
+        <article class="service"><span class="number">02 / AUDIT</span><h3>Google Business Profile visibility audit</h3><p>A review of one public profile and its local visibility signals, categories, service details, photos, reviews, and practical update priorities.</p><div class="price"><strong>$45</strong><span>Written audit<br>within 24 hours</span></div></article>
+        <article class="service"><span class="number">03 / BUILD</span><h3>One-page responsive landing page</h3><p>An original, responsive HTML, CSS, and JavaScript landing page for one offer, structured for a clear call to action.</p><div class="price"><strong>$95</strong><span>Source files<br>within 24 hours</span></div></article>
+      </div>
+    </section>
+    <section class="details" aria-labelledby="details-title"><div class="wrap"><div class="section-head"><h2 id="details-title">What is included.</h2><p>Precise scope keeps delivery fast. Work is based on the information and links you provide, then prepared specifically for your business.</p></div><div class="detail-grid">
+      <article class="detail"><h3>Landing-page audit</h3><ul><li>Message and audience-fit review</li><li>Headline, offer, and call-to-action recommendations</li><li>Flow, trust, and mobile usability notes</li><li>Prioritized written action list</li></ul></article>
+      <article class="detail"><h3>Google profile audit</h3><ul><li>Public profile and local-search review</li><li>Category, service, photo, and review observations</li><li>Profile-completeness priorities</li><li>Prioritized written action list</li></ul></article>
+      <article class="detail"><h3>One-page landing page</h3><ul><li>One original page for one primary offer</li><li>Responsive HTML, CSS, and lightweight JavaScript</li><li>Mobile-friendly layout and accessible markup</li><li>Source files and setup notes</li></ul></article>
+      <article class="detail"><h3>Inputs needed</h3><ul><li>Your website or Google Business Profile link</li><li>Business name, offer, audience, and location if relevant</li><li>For a build: logo, colors, copy, images, and desired action</li><li>Any required legal text or existing brand rules</li></ul></article>
+    </div></div></section>
+    <section class="wrap" aria-labelledby="process-title"><div class="section-head"><h2 id="process-title">Short process.<br>Useful output.</h2><p>Delivery starts once the required links and details are supplied. One round of factual corrections is included for audit deliverables; build scope is limited to the agreed single page.</p></div><div class="process">
+      <article class="step"><span>01</span><h3>Send the essentials</h3><p>Provide the relevant link and business details. For a build, provide the approved copy and assets.</p></article>
+      <article class="step"><span>02</span><h3>Receive focused work</h3><p>Delivery is prepared within 24 hours of receiving complete inputs.</p></article>
+      <article class="step"><span>03</span><h3>Put it to use</h3><p>Use the priorities yourself, share them with your team, or publish the provided page files.</p></article>
+    </div></section>
+    <section class="wrap"><div class="cta"><div><h2>Need a clearer starting point?</h2><p>Choose the service that matches the decision in front of you. Work is original and tailored to the supplied business information. Results depend on many factors, so no ranking, traffic, lead, sales, or performance outcome is guaranteed.</p></div><div class="actions"><a class="button" href="https://github.com/kaebe13-tech/Kaoe/issues/new?title=Service%20inquiry">Start an inquiry</a><a class="button secondary" href="sample-landing-page-audit.pdf">View sample audit</a><a class="button secondary" href="https://cash.app/$KalebAbe0">Verified Cash App</a></div></div></section>
+  </main>
+  <footer class="wrap"><span>© 2026 Signal &amp; Structure</span><span>Original, scoped digital services.</span></footer>
+</body>
+</html>
