@@ -2,21 +2,23 @@ import { clamp01, smoothstep, type V2 } from '../core/math';
 import { hash01 } from '../core/rng';
 import type { Agent } from '../agents/Agent';
 import type { World } from '../sim/World';
-import { DAY_LENGTH, HOUR } from '../world/config';
+import { DAY_LENGTH, HOUR, MAP_N } from '../world/config';
 import { BLUEPRINTS } from '../sim/blueprints';
 import { EXPLORE_CELL, EXPLORE_N, EXPLORE_ORIGIN } from '../agents/Memory';
 import {
   campfire,
+  campCenter,
   chooseSite,
   doorSpot,
   fireSeat,
+  isHome,
   nextProject,
   siteNeeds,
   sitesOf,
   storageRoom,
   storages,
-  tribeFood,
-  tribeStored,
+  settlementFood,
+  settlementStored,
   workSpot,
   allowedProgress,
   hasFreeBed,
@@ -25,14 +27,20 @@ import {
   CARRY_CAPACITY,
   FOOD_ITEMS,
   ITEMS,
+  ITEM_SOURCE,
   foodCount,
   inventoryWeight,
   isHarvestable,
+  isFoodKind,
   resourceLabel,
   type ItemType,
+  type ResourceKind,
   type ResourceNode,
   type Structure,
 } from '../sim/types';
+import type { Civilization } from '../civ/Civilization';
+import type { Priorities } from '../civ/cultures';
+import { LANDMARK_INFO } from '../world/biomes';
 import { onCooldown, type Candidate } from './brainCore';
 import {
   AddFuel,
@@ -58,6 +66,9 @@ import {
   Withdraw,
   Pray,
   Play,
+  Envoy,
+  Worship,
+  Address,
   approachPoint,
   fleePoint,
   pickLine,
@@ -70,25 +81,54 @@ export interface ThinkContext {
   hour: number;
   night: boolean;
   rain: number;
+  /** The agent's settlement. */
+  sid: number;
+  civ: Civilization | undefined;
   camp: V2;
   fire: Structure | undefined;
+  /** Settlement population. */
   pop: number;
   stores: Structure[];
   foodStored: number;
+  /** Civilization priorities right now (culture x leader x objectives x divine effects). */
+  focus: Priorities;
+  isLeader: boolean;
+  /** Fellow settlers (living). */
+  mates: Agent[];
 }
 
+const NEUTRAL: Priorities = { build: 1, expand: 1, gather: 1, explore: 1, faith: 1, social: 1, defend: 1 };
+const focusCache = new Map<number, { t: number; f: Priorities }>();
+
 export function buildContext(a: Agent, w: World): ThinkContext {
-  const fire = campfire(w);
+  const sid = a.settlementId;
+  const fire = campfire(w, sid);
+  const civ = w.civOf(a);
+  let focus = NEUTRAL;
+  if (civ) {
+    const c = focusCache.get(civ.id);
+    if (c && Math.abs(c.t - w.worldTime) < 2) focus = c.f;
+    else {
+      focus = civ.focus(w.agent(civ.leaderId), w.worldTime);
+      focusCache.set(civ.id, { t: w.worldTime, f: focus });
+    }
+  }
+  const mates = civ ? civ.members.filter((o) => o.alive && o.settlementId === sid) : w.living;
   return {
     now: w.time,
     hour: w.hour,
     night: w.isNight,
     rain: a.inside !== null ? 0 : w.rainAt(a.x, a.z),
-    camp: fire ? { x: fire.x, z: fire.z } : w.start,
+    sid,
+    civ,
+    camp: fire ? { x: fire.x, z: fire.z } : campCenter(w, sid),
     fire,
-    pop: w.living.length,
-    stores: storages(w),
-    foodStored: tribeFood(w),
+    pop: mates.length,
+    stores: storages(w, sid),
+    foodStored: settlementFood(w, sid),
+    focus,
+    isLeader: !!civ && civ.leaderId === a.id,
+    mates,
   };
 }
 
@@ -124,28 +164,41 @@ const flee: GoalFn = (a, w, ctx) => {
     const dd = Math.hypot(d.x - a.x, d.z - a.z);
     if (dd < d.radius + bias && (!threat || dd < threat.d)) threat = { x: d.x, z: d.z, kind: d.kind, d: dd };
   }
+  // Hostile strangers close by frighten the timid and the children.
+  if (!threat && ctx.civ && (a.has('timid') || a.isChild || a.needs.safety < 0.35) && !a.has('brave')) {
+    w.agentHash.query(a.x, a.z, 7, (o) => {
+      if (o.civId === a.civId || o.civId < 0 || !o.alive) return;
+      const st = ctx.civ!.relations.get(o.civId)?.state;
+      if (st === 'hostile') {
+        threat = { x: o.x, z: o.z, kind: 'hostile', d: Math.hypot(o.x - a.x, o.z - a.z) };
+        return true;
+      }
+      return false;
+    });
+  }
   if (!threat) return null;
+  const hostile = threat.kind === 'hostile';
   const campSafe = dist(ctx.camp, threat) > 16 ? ctx.camp : undefined;
   const pt = fleePoint(w, a, threat, 15 + (a.has('timid') ? 5 : 0), campSafe);
   if (!pt) return null;
-  const reason = threat.kind === 'fire' ? 'Fire is spreading nearby!' : 'Lightning struck close by!';
+  const reason = hostile ? 'Hostile strangers are too close' : threat.kind === 'fire' ? 'Fire is spreading nearby!' : threat.kind === 'quake' ? 'The ground is shaking!' : 'Something struck close by!';
   return {
     goal: 'flee',
-    label: 'Escape danger',
+    label: hostile ? 'Back away' : 'Escape danger',
     icon: 'warning',
-    score: 1.6,
-    urgent: true,
+    score: hostile ? 0.9 : 1.6,
+    urgent: !hostile,
     reason,
     targetLabel: 'somewhere safe',
     target: pt,
     key: 'flee',
-    thought: threat.kind === 'fire' ? pickLine(a, ['Fire! Run!', 'The trees are burning — get away!', 'Too hot, too close!']) : pickLine(a, ['The sky is angry!', 'Run, run, run!', 'That was far too close...']),
+    thought: hostile ? pickLine(a, ["I don't like the look of them.", 'Best keep my distance.', 'Strangers. Walk away slowly.']) : threat.kind === 'fire' ? pickLine(a, ['Fire! Run!', 'The trees are burning, get away!', 'Too hot, too close!']) : pickLine(a, ['The sky is angry!', 'Run, run, run!', 'That was far too close...']),
     build: () => [new MoveTo(() => pt, 'safety', { run: true, arrive: 1.5 }), new Cower(2.5)],
   };
 };
 
 function nearestSpot(w: World, a: Agent, pondId: number): { spot: V2; pond: V2 } | null {
-  const pond = w.water.find((p) => p.id === pondId);
+  const pond = w.waterBody(pondId);
   if (!pond || !pond.spots.length) return null;
   const sorted = [...pond.spots].sort((s1, s2) => dist(a, s1) - dist(a, s2)).slice(0, 4);
   // Among the few closest spots, prefer the least crowded one.
@@ -162,7 +215,7 @@ function nearestSpot(w: World, a: Agent, pondId: number): { spot: V2; pond: V2 }
       best = s;
     }
   }
-  return { spot: best, pond: { x: pond.x, z: pond.z } };
+  return { spot: best, pond: { x: best.wx, z: best.wz } };
 }
 
 const drink: GoalFn = (a, w, ctx) => {
@@ -185,6 +238,24 @@ const drink: GoalFn = (a, w, ctx) => {
       build: () => [new CatchRain()],
     });
   }
+  // A village well beats a long walk.
+  const well = w.structures.find((st) => st.kind === 'well' && st.complete && st.settlementId === ctx.sid);
+  if (well) {
+    const d = dist(a, well);
+    out.push({
+      goal: 'drink',
+      label: 'Quench thirst',
+      icon: 'water',
+      score: u * travel(d) * 1.05,
+      urgent,
+      reason: `${reason}. The well is close`,
+      targetLabel: `The well (${Math.round(d)}m)`,
+      target: well,
+      key: 'drink:well',
+      thought: pickLine(a, ['Water from the well.', 'Good thing we dug that well.']),
+      build: () => [new MoveTo(() => workSpot(w, well, a.id), 'the well', { arrive: 0.4 }), new Drink({ x: well.x, z: well.z })],
+    });
+  }
   let best: { spot: V2; pond: V2; d: number; id: number } | null = null;
   for (const [pid, wm] of a.memory.water) {
     if (wm.avoidUntil > ctx.now || onCooldown(a, `drink:${pid}`, ctx.now)) continue;
@@ -202,11 +273,11 @@ const drink: GoalFn = (a, w, ctx) => {
       score: u * travel(b.d),
       urgent,
       reason,
-      targetLabel: `Pond ${describePlace(w, b.pond.x, b.pond.z)} (${Math.round(b.d)}m)`,
+      targetLabel: `Water ${describePlace(w, b.pond.x, b.pond.z, false, a)} (${Math.round(b.d)}m)`,
       target: b.spot,
       key: `drink:${b.id}`,
-      thought: a.needs.thirst < 0.25 ? pickLine(a, ['So thirsty... need water now.', 'My throat is dry as sand.', 'Water. Now.']) : pickLine(a, ['A cool drink from the pond sounds good.', "I'll grab a drink.", 'Time for some water.']),
-      build: () => [new MoveTo(() => b.spot, 'the pond', { arrive: 0.35, run: a.needs.thirst < 0.15 }), new Drink(b.pond)],
+      thought: a.needs.thirst < 0.25 ? pickLine(a, ['So thirsty... need water now.', 'My throat is dry as sand.', 'Water. Now.']) : pickLine(a, ['A cool drink sounds good.', "I'll grab a drink.", 'Time for some water.']),
+      build: () => [new MoveTo(() => b.spot, 'the water', { arrive: 0.35, run: a.needs.thirst < 0.15 }), new Drink(b.pond, w.waterBody(b.id)?.kind === 'spring')],
     });
   } else if (!out.length) {
     const dest = exploreTarget(a, w, 'water');
@@ -218,10 +289,10 @@ const drink: GoalFn = (a, w, ctx) => {
         score: u * 0.92,
         urgent,
         reason: `${reason}, but no fresh water is known`,
-        targetLabel: `unexplored land ${describePlace(w, dest.x, dest.z)}`,
+        targetLabel: `unexplored land ${describePlace(w, dest.x, dest.z, false, a)}`,
         target: dest,
         key: 'drink:search',
-        thought: pickLine(a, ['There must be fresh water somewhere...', 'I need to find a stream or a pond.', 'Where can I find water on this island?']),
+        thought: pickLine(a, ['There must be fresh water somewhere...', 'I need to find a stream or a lake.', 'Where is the water in this land?']),
         build: () => [new Search('water', dest, () => a.memory.water.size > 0)],
       });
     }
@@ -242,8 +313,8 @@ export function bestFoodSource(a: Agent, w: World, need: number, only?: ItemType
   let best: FoodChoice | null = null;
   const now = w.time;
   for (const m of a.memory.resources.values()) {
-    if (m.kind !== 'berryBush' && m.kind !== 'fruitTree') continue;
-    const item: ItemType = m.kind === 'fruitTree' ? 'fruit' : 'berries';
+    if (!isFoodKind(m.kind)) continue;
+    const item: ItemType = m.kind === 'fruitTree' ? 'fruit' : m.kind === 'mushroom' ? 'mushrooms' : 'berries';
     if (only && item !== only) continue;
     if (m.avoidUntil > now || onCooldown(a, `eat:${m.id}`, now) || onCooldown(a, `food:${m.id}`, now)) continue;
     const r = w.resources.get(m.id);
@@ -251,7 +322,7 @@ export function bestFoodSource(a: Agent, w: World, need: number, only?: ItemType
     let est = m.amount;
     if (est <= 0) {
       const since = now - m.seenAt;
-      est = Math.min(3, Math.floor(since / (HOUR * (item === 'fruit' ? 5 : 3))));
+      est = Math.min(3, Math.floor(since / (HOUR * (item === 'fruit' ? 5 : item === 'mushrooms' ? 4 : 3))));
     }
     if (est <= 0) continue;
     const avail = est - r.claims * 2.5;
@@ -334,7 +405,7 @@ const eat: GoalFn = (a, w, ctx) => {
       score: u * travel(src.d),
       urgent,
       reason,
-      targetLabel: `${resourceLabel(src.r)} ${describePlace(w, src.r.x, src.r.z)} (${Math.round(src.d)}m)`,
+      targetLabel: `${resourceLabel(src.r)} ${describePlace(w, src.r.x, src.r.z, false, a)} (${Math.round(src.d)}m)`,
       target: src.r,
       targetId: src.r.id,
       key: `eat:${src.r.id}`,
@@ -343,7 +414,9 @@ const eat: GoalFn = (a, w, ctx) => {
         hungryLine ||
         (src.r.kind === 'fruitTree'
           ? pickLine(a, ['That fruit tree should have something ripe.', 'Sweet fruit, here I come.', 'I remember a fruit tree over there.'])
-          : pickLine(a, ['Those berries should still be there.', "I know where there's a berry bush.", 'Berries would hit the spot.'])),
+          : src.r.kind === 'mushroom'
+            ? pickLine(a, ['Mushrooms under the old trees.', 'Those mushrooms should be ready.', 'Mushroom stew, maybe?'])
+            : pickLine(a, ['Those berries should still be there.', "I know where there's a berry bush.", 'Berries would hit the spot.'])),
       build: () => [...foodTrip(a, w, src, count)(), new Eat()],
     });
   } else if (!carried && !ctx.foodStored) {
@@ -356,7 +429,7 @@ const eat: GoalFn = (a, w, ctx) => {
         score: u * 0.9,
         urgent,
         reason: `${reason}, and knows of no food nearby`,
-        targetLabel: `unexplored land ${describePlace(w, dest.x, dest.z)}`,
+        targetLabel: `unexplored land ${describePlace(w, dest.x, dest.z, false, a)}`,
         target: dest,
         key: 'eat:search',
         thought: pickLine(a, ['There must be something to eat out there.', "I'll have to go looking for food.", 'Maybe the meadows have berries...']),
@@ -410,20 +483,20 @@ const sleep: GoalFn = (a, w, ctx) => {
     };
   }
   // Homeless: claim a free bed if there is one.
-  const freeHut = a.isChild ? undefined : w.structures.find((s) => s.complete && hasFreeBed(w, s));
+  const freeHut = a.isChild ? undefined : w.structures.find((s) => s.settlementId === ctx.sid && s.complete && hasFreeBed(w, s));
   if (freeHut) {
     return {
       goal: 'sleep',
       label: 'Go to bed',
       icon: 'sleep',
       score: u,
-      reason: `${reason}. There's a free bed in a hut`,
-      targetLabel: 'A hut with a free bed',
+      reason: `${reason}. There's a free bed in a ${BLUEPRINTS[freeHut.kind].name.toLowerCase()}`,
+      targetLabel: `A ${BLUEPRINTS[freeHut.kind].name.toLowerCase()} with a free bed`,
       target: freeHut,
       key: 'sleep:claim',
       thought: pickLine(a, ["There's room in that hut. I'll take it.", 'A real roof tonight!']),
       build: () => [
-        new MoveTo(() => doorSpot(w, freeHut), 'the hut', { arrive: 0.5 }),
+        new MoveTo(() => doorSpot(w, freeHut), `the ${BLUEPRINTS[freeHut.kind].name.toLowerCase()}`, { arrive: 0.5 }),
         new ClaimBed(freeHut.id),
         new Sleep('hut', freeHut.id),
       ],
@@ -437,11 +510,11 @@ const sleep: GoalFn = (a, w, ctx) => {
       label: 'Sleep by the fire',
       icon: 'sleep',
       score: u,
-      reason: `${reason}. No hut yet, so the fire will do`,
+      reason: `${reason}. No home yet, so the fire will do`,
       targetLabel: `Campfire (${Math.round(d)}m)`,
       target: fire,
       key: 'sleep:fire',
-      thought: pickLine(a, ["I'll sleep by the warm fire.", 'Sleeping under the stars again...', 'We really need huts.']),
+      thought: pickLine(a, ["I'll sleep by the warm fire.", 'Sleeping under the stars again...', 'We really need a roof.']),
       build: () => [new MoveTo(() => fireSeat(w, fire, a.id), 'the campfire', { arrive: 0.4 }), new Sleep('fire', fire.id)],
     };
   }
@@ -467,14 +540,15 @@ class ClaimBed extends Rest {
 
   override tick(a: Agent, w: World, dt: number) {
     const hut = w.structure(this.hutId);
-    if (!hut) return this.fail('The hut is gone');
+    if (!hut) return this.fail('The home is gone');
     if (!hut.residents.includes(a.id)) {
       if (!hasFreeBed(w, hut)) return this.fail('Someone else took the last bed');
       hut.residents.push(a.id);
       a.homeId = hut.id;
       const mates = hut.residents.filter((id) => id !== a.id).map((id) => w.agent(id)?.name).filter(Boolean);
-      a.addLog(w.time, 'event', `Claimed a bed in the hut${mates.length ? ` with ${mates.join(', ')}` : ''}.`);
-      w.log(`${a.name} moved into a hut${mates.length ? ` with ${mates.join(', ')}` : ''}.`, 'home', 1, hut, a.id);
+      const nm = BLUEPRINTS[hut.kind].name.toLowerCase();
+      a.addLog(w.time, 'event', `Claimed a bed in the ${nm}${mates.length ? ` with ${mates.join(', ')}` : ''}.`);
+      w.log(`${a.name} moved into a ${nm}${mates.length ? ` with ${mates.join(', ')}` : ''}.`, 'home', 1, hut, a.id);
     }
     return super.tick(a, w, dt);
   }
@@ -529,7 +603,7 @@ const comfort: GoalFn = (a, w, ctx) => {
   if (!a.awake) return null;
   let u = a.needs.safety < 0.55 ? (0.55 - a.needs.safety) * 1.3 : 0;
   const far = dist(a, ctx.camp) > 28;
-  if (ctx.night && far && a.has('timid')) u = Math.max(u, 0.32);
+  if (ctx.night && far && a.has('timid') && !a.brain.active?.key.startsWith('expedition')) u = Math.max(u, 0.32);
   if (u < 0.05) return null;
   const fire = ctx.fire;
   const reason = a.needs.safety < 0.4 ? `Shaken and scared (safety ${pct(a.needs.safety)})` : 'Nervous out here in the dark';
@@ -591,8 +665,26 @@ const socialize: GoalFn = (a, w, ctx) => {
   if (a.has('sociable')) u *= 1.35;
   const fire = ctx.fire;
   if (fire && fire.complete && fire.lit && ctx.hour >= 18 && ctx.hour < 21.8 && ctx.rain < 0.3) {
-    const ev = 0.3 + (a.has('sociable') ? 0.08 : 0) + (1 - a.needs.social) * 0.25;
+    const ev = (0.3 + (a.has('sociable') ? 0.08 : 0) + (1 - a.needs.social) * 0.25) * Math.min(1.25, ctx.focus.social);
     const stay = Math.max(20, (21.8 - ctx.hour) * HOUR);
+    if (ctx.isLeader && ctx.pop >= 4) {
+      out.push({
+        goal: 'socialize',
+        label: 'Speak to the people',
+        icon: 'fire',
+        score: ev + 0.05,
+        reason: 'The leader speaks at the evening fire',
+        targetLabel: 'The campfire',
+        target: fire,
+        key: 'socialize:address',
+        thought: pickLine(a, ['They look to me for answers. I had better have some.', 'Tonight I will tell them what comes next.', 'A leader must be heard.']),
+        build: () => [new MoveTo(() => fireSeat(w, fire, a.id), 'the campfire', { arrive: 0.35 }), new Address(fire.id, Math.min(stay, HOUR * 0.8))],
+        onComplete: (ag, wd) => {
+          ag.brain.cooldowns.set('socialize:address', wd.time + DAY_LENGTH * 0.7);
+          return 'Spoke to the people by the fire.';
+        },
+      });
+    }
     out.push({
       goal: 'socialize',
       label: 'Gather at the campfire',
@@ -611,7 +703,7 @@ const socialize: GoalFn = (a, w, ctx) => {
   if (u < 0.05 && casual <= 0) return out;
   let best: Agent | null = null;
   let bestScore = -Infinity;
-  for (const o of w.agents) {
+  for (const o of ctx.mates) {
     if (o === a || !o.alive || !o.awake || o.inside !== null) continue;
     if (onCooldown(a, `talk:${o.id}`, ctx.now)) continue;
     const d = dist(a, o);
@@ -651,13 +743,14 @@ const help: GoalFn = (a, w, ctx) => {
   if (!a.awake || a.needs.hunger < 0.3 || a.needs.thirst < 0.3 || a.needs.energy < 0.15) return null;
   let best: Candidate | null = null;
   const carried = foodCount(a.inventory);
-  for (const o of w.agents) {
+  const kin = ctx.civ ? ctx.civ.members : w.agents;
+  for (const o of kin) {
     if (o === a || !o.alive) continue;
     const d = dist(a, o);
     if (d > 55) continue;
     const key = `help:${o.id}`;
     if (onCooldown(a, key, ctx.now)) continue;
-    if (w.agents.some((x) => x !== a && x.brain.active?.key === key)) continue;
+    if (kin.some((x) => x !== a && x.brain.active?.key === key)) continue;
     const kindB = a.has('kind') ? 0.15 : 0;
     // Starving and not already eating.
     if (o.needs.hunger < 0.2 && foodCount(o.inventory) === 0 && o.brain.active?.goal !== 'eat') {
@@ -725,6 +818,11 @@ function workBias(a: Agent): number {
   return (a.has('industrious') ? 0.1 : 0) - (a.has('sleepy') ? 0.05 : 0);
 }
 
+/** Civilization drive to build, gently scaled into utility space. */
+function drive(v: number): number {
+  return 0.75 + 0.25 * Math.min(1.8, v);
+}
+
 function nightWork(ctx: ThinkContext): number {
   if (ctx.night) return 0.35;
   if (ctx.hour >= 19.5) return 0.7;
@@ -732,68 +830,84 @@ function nightWork(ctx: ThinkContext): number {
 }
 
 const found: GoalFn = (a, w, ctx) => {
-  if (!a.awake || ctx.night || a.needs.energy < 0.3) return null;
-  const proj = nextProject(w);
+  if (!a.awake || ctx.night || a.needs.energy < 0.3 || !ctx.civ) return null;
+  const proj = nextProject(w, ctx.sid, ctx.civ, ctx.focus);
   if (!proj) return null;
-  if (w.agents.some((o) => o !== a && o.brain.active?.goal === 'found')) return null;
-  const site = chooseSite(w, proj.kind, proj.kind === 'campfire' ? w.start : undefined);
+  if (ctx.mates.some((o) => o !== a && o.brain.active?.goal === 'found')) return null;
+  const st = w.settlement(ctx.sid);
+  const site = chooseSite(w, proj.kind, ctx.sid, proj.kind === 'campfire' && st ? { x: st.x, z: st.z } : undefined);
   if (!site) return null;
   const name = BLUEPRINTS[proj.kind].name.toLowerCase();
-  const base = proj.kind === 'campfire' ? 0.56 : proj.kind === 'hut' ? 0.46 : 0.4;
+  const base = proj.kind === 'campfire' ? 0.58 : isHome({ kind: proj.kind } as Structure) ? 0.46 : 0.4;
   const d = dist(a, site);
   return {
     goal: 'found',
     label: `Start a ${name}`,
     icon: 'build',
-    score: (base + workBias(a)) * travel(d) * nightWork(ctx),
+    score: (base + workBias(a)) * travel(d * (proj.kind === 'campfire' ? 0.3 : 1)) * nightWork(ctx) * drive(ctx.focus.build),
     reason: proj.reason,
-    targetLabel: `A clear spot ${describePlace(w, site.x, site.z)}`,
+    targetLabel: `A clear spot ${describePlace(w, site.x, site.z, false, a)}`,
     target: site,
     key: `found:${proj.kind}`,
     thought:
       proj.kind === 'campfire'
         ? pickLine(a, ["We need a fire. I'll pick a good spot.", 'A campfire here would be perfect.', 'Fire first, then everything else.'])
-        : proj.kind === 'hut'
-          ? pickLine(a, ["Sleeping outside again? No. Let's build a hut.", "I'll mark out a hut right there.", 'A roof over our heads — that’s the plan.'])
-          : pickLine(a, [`The tribe could really use a ${name}.`, `Time to start on a ${name}.`]),
-    build: () => [new MoveTo(() => site, 'the building spot', { arrive: 1.4 }), new PlaceSite(proj.kind, site, proj.reason)],
+        : isHome({ kind: proj.kind } as Structure)
+          ? pickLine(a, [`Sleeping outside again? No. Let's build a ${name}.`, `I'll mark out a ${name} right there.`, 'A roof over our heads, that is the plan.'])
+          : pickLine(a, [`We could really use a ${name}.`, `Time to start on a ${name}.`]),
+    build: () => [new MoveTo(() => site, 'the building spot', { arrive: 1.4 }), new PlaceSite(proj.kind, site, proj.reason, ctx.sid)],
   };
 };
 
-/** Nearest standing tree that isn't burning, preferring ones on the way to `toward`. */
-function pickTree(a: Agent, w: World, toward: V2 | null, radius = 45): ResourceNode | null {
+/**
+ * Nearest harvestable source of a material (trees for wood, boulders for stone, crystal clusters),
+ * preferring ones on the way to `toward`. Falls back to remembered sources further away.
+ */
+function pickSource(a: Agent, w: World, item: ItemType, toward: V2 | null, radius = 45): ResourceNode | null {
+  const kind: ResourceKind = ITEM_SOURCE[item];
   let best: ResourceNode | null = null;
   let bestS = Infinity;
-  const scan = (r: number) => {
-    w.resourceHash.query(a.x, a.z, r, (t) => {
-      if (t.kind !== 'tree' || !isHarvestable(t)) return;
-      if (onCooldown(a, `tree:${t.id}`, w.time)) return;
-      const crowd = t.claims > 0 && t.amount <= t.claims * 2 ? 12 : t.claims * 3;
-      const s = dist(a, t) + (toward ? dist(t, toward) * 0.7 : 0) + crowd;
-      if (s < bestS) {
-        bestS = s;
-        best = t;
-      }
-    });
+  const consider = (t: ResourceNode) => {
+    if (t.kind !== kind || !isHarvestable(t)) return;
+    if (onCooldown(a, `tree:${t.id}`, w.time)) return;
+    const crowd = t.claims > 0 && t.amount <= t.claims * 2 ? 12 : t.claims * 3;
+    // Don't strip the forest right next to home when there's wood a little further out.
+    const s = dist(a, t) + (toward ? dist(t, toward) * 0.7 : 0) + crowd;
+    if (s < bestS) {
+      bestS = s;
+      best = t;
+    }
   };
-  scan(radius);
-  if (!best) scan(radius * 2);
+  w.resourceHash.query(a.x, a.z, radius, consider);
+  if (!best) w.resourceHash.query(a.x, a.z, radius * 2, consider);
+  if (!best && kind !== 'tree') {
+    for (const m of a.memory.resources.values()) {
+      if (m.kind !== kind || m.amount <= 0 || m.avoidUntil > w.time) continue;
+      const r = w.resources.get(m.id);
+      if (r) consider(r);
+    }
+  }
   return best;
 }
 
-function woodTrip(a: Agent, w: World, tree: ResourceNode, count: number): Array<MoveTo | Harvest> {
+function pickTree(a: Agent, w: World, toward: V2 | null, radius = 45): ResourceNode | null {
+  return pickSource(a, w, 'wood', toward, radius);
+}
+
+function woodTrip(a: Agent, w: World, tree: ResourceNode, count: number, item: ItemType = 'wood'): Array<MoveTo | Harvest> {
+  const gone = item === 'wood' ? 'Someone had already cut the tree down' : item === 'stone' ? 'The boulder was already broken up' : 'The crystal was already taken';
   return [
-    new MoveTo(() => approachPoint(w, a, tree.x, tree.z, reachOf('tree', tree.blockRadius) - 0.25), resourceLabel(tree).toLowerCase(), {
+    new MoveTo(() => approachPoint(w, a, tree.x, tree.z, reachOf(tree.kind, tree.blockRadius) - 0.25), resourceLabel(tree).toLowerCase(), {
       arrive: 0.3,
-      valid: () => (tree.state !== 'grown' ? 'Someone had already cut the tree down' : tree.burning > 0 ? 'The tree caught fire!' : null),
+      valid: () => (tree.state !== 'grown' || tree.amount <= 0 ? gone : tree.burning > 0 ? 'It caught fire!' : null),
     }),
-    new Harvest(tree.id, count, 'wood'),
+    new Harvest(tree.id, count, item),
   ];
 }
 
 const supply: GoalFn = (a, w, ctx) => {
   if (!a.awake) return null;
-  const sites = sitesOf(w).filter((s) => s.burning <= 0);
+  const sites = sitesOf(w, ctx.sid).filter((s) => s.burning <= 0);
   if (!sites.length) return null;
   let best: Candidate | null = null;
   for (const s of sites) {
@@ -803,7 +917,7 @@ const supply: GoalFn = (a, w, ctx) => {
     const need = needs[item]!;
     const name = BLUEPRINTS[s.kind].name.toLowerCase();
     const age = Math.min(0.08, (ctx.now - s.foundedAt) / (HOUR * 6) * 0.08);
-    const base = 0.36 + workBias(a) + age + (s.foundedBy === a.id ? 0.04 : 0) + (s.kind === 'campfire' ? 0.08 : 0);
+    const base = (0.36 + workBias(a) + age + (s.foundedBy === a.id ? 0.04 : 0) + (s.kind === 'campfire' ? 0.08 : 0)) * drive(ctx.focus.build);
     const reason = `The ${name} needs ${plural(need, ITEMS[item].label, ITEMS[item].plural)} more`;
     const spot = () => workSpot(w, s, a.id);
     let cand: Candidate | null = null;
@@ -823,25 +937,52 @@ const supply: GoalFn = (a, w, ctx) => {
         thought: pickLine(a, ['Got the goods, heading to the site.', "Let's get these to the builders.", 'One more load for the site.']),
         build: () => [new MoveTo(spot, `the ${name} site`, { arrive: 0.5 }), new Deliver(s.id, item)],
       };
-    } else if (item === 'wood') {
-      const tree = pickTree(a, w, s);
+    } else if (item === 'wood' || item === 'stone' || item === 'crystal') {
+      // Stored materials first; otherwise go and get some.
+      const store = ctx.stores.find((st) => st.stored[item] > 0);
+      if (store) {
+        const n = Math.min(need, store.stored[item], Math.floor((CARRY_CAPACITY - inventoryWeight(a.inventory)) / ITEMS[item].weight));
+        if (n > 0) {
+          cand = {
+            goal: 'supply',
+            label: `Fetch ${ITEMS[item].plural}`,
+            icon: item === 'wood' ? 'wood' : 'build',
+            score: (base + 0.04) * travel(dist(a, store) + dist(store, s)) * nightWork(ctx),
+            reason: `${reason}, and the ${BLUEPRINTS[store.kind].name.toLowerCase()} has some`,
+            targetLabel: `${BLUEPRINTS[store.kind].name} → ${BLUEPRINTS[s.kind].name}`,
+            target: store,
+            targetId: s.id,
+            key: `supply:${s.id}:store`,
+            claims: { site: { id: s.id, item, promised: n } },
+            thought: pickLine(a, ['There is some in the stores.', 'No need to go far, we have some stored.']),
+            build: () => [new MoveTo(() => doorSpot(w, store), `the ${BLUEPRINTS[store.kind].name.toLowerCase()}`, { arrive: 0.5 }), new Withdraw(store.id, item, n), new MoveTo(spot, `the ${name} site`, { arrive: 0.5 }), new Deliver(s.id, item)],
+          };
+        }
+      }
+      const tree = cand ? null : pickSource(a, w, item, s, item === 'wood' ? 45 : 60);
       if (tree) {
-        const room = Math.floor(CARRY_CAPACITY - inventoryWeight(a.inventory));
+        const room = Math.floor((CARRY_CAPACITY - inventoryWeight(a.inventory)) / ITEMS[item].weight);
         const n = Math.max(1, Math.min(need, room, tree.amount));
         const d = dist(a, tree) + dist(tree, s);
+        const verb = item === 'wood' ? 'Gather wood' : item === 'stone' ? 'Quarry stone' : 'Mine crystal';
         cand = {
           goal: 'supply',
-          label: 'Gather wood',
-          icon: 'wood',
+          label: verb,
+          icon: item === 'wood' ? 'wood' : 'build',
           score: base * travel(d * 0.8) * nightWork(ctx),
           reason,
-          targetLabel: `${resourceLabel(tree)} ${describePlace(w, tree.x, tree.z)} → ${BLUEPRINTS[s.kind].name}`,
+          targetLabel: `${resourceLabel(tree)} ${describePlace(w, tree.x, tree.z, false, a)} → ${BLUEPRINTS[s.kind].name}`,
           target: tree,
           targetId: tree.id,
           key: `supply:${s.id}:${tree.id}`,
-          claims: { resource: tree.id, site: { id: s.id, item: 'wood', promised: n } },
-          thought: pickLine(a, ["That tree will make good logs.", `We need wood for the ${name}.`, 'Time to swing the axe.', "I'll fetch some logs."]),
-          build: () => [...woodTrip(a, w, tree, n), new MoveTo(spot, `the ${name} site`, { arrive: 0.5 }), new Deliver(s.id, 'wood')],
+          claims: { resource: tree.id, site: { id: s.id, item, promised: n } },
+          thought:
+            item === 'wood'
+              ? pickLine(a, ['That tree will make good logs.', `We need wood for the ${name}.`, 'Time to swing the axe.', "I'll fetch some logs."])
+              : item === 'stone'
+                ? pickLine(a, ['Stone for the walls.', 'That boulder will split nicely.', `The ${name} needs good stone.`])
+                : pickLine(a, ['The crystal hums when you touch it.', 'Careful... these shards are sharp.']),
+          build: () => [...woodTrip(a, w, tree, n, item), new MoveTo(spot, `the ${name} site`, { arrive: 0.5 }), new Deliver(s.id, item)],
         };
       }
     } else {
@@ -854,7 +995,7 @@ const supply: GoalFn = (a, w, ctx) => {
           icon: 'food',
           score: base * travel(src.d) * nightWork(ctx),
           reason,
-          targetLabel: `${resourceLabel(src.r)} ${describePlace(w, src.r.x, src.r.z)} → ${BLUEPRINTS[s.kind].name}`,
+          targetLabel: `${resourceLabel(src.r)} ${describePlace(w, src.r.x, src.r.z, false, a)} → ${BLUEPRINTS[s.kind].name}`,
           target: src.r,
           targetId: src.r.id,
           key: `supply:${s.id}:${src.r.id}`,
@@ -872,12 +1013,12 @@ const supply: GoalFn = (a, w, ctx) => {
 const construct: GoalFn = (a, w, ctx) => {
   if (!a.awake || a.needs.energy < 0.15) return null;
   let best: Candidate | null = null;
-  for (const s of sitesOf(w)) {
+  for (const s of sitesOf(w, ctx.sid)) {
     if (s.burning > 0 || allowedProgress(s) <= s.progress + 1e-4) continue;
     const name = BLUEPRINTS[s.kind].name.toLowerCase();
     const d = dist(a, s);
-    const helpers = w.agents.filter((o) => o !== a && o.brain.active?.goal === 'construct' && o.brain.active.targetId === s.id).length;
-    const score = (0.44 + workBias(a) + (s.foundedBy === a.id ? 0.05 : 0) - helpers * 0.03) * travel(d) * nightWork(ctx);
+    const helpers = ctx.mates.filter((o) => o !== a && o.brain.active?.goal === 'construct' && o.brain.active.targetId === s.id).length;
+    const score = (0.44 + workBias(a) + (s.foundedBy === a.id ? 0.05 : 0) - helpers * 0.03) * travel(d) * nightWork(ctx) * drive(ctx.focus.build);
     const founder = w.agent(s.foundedBy);
     const reason = founder && founder !== a && founder.alive ? `Helping ${founder.name} build the ${name} (${pct(s.progress)} done)` : `Materials are ready for the ${name} (${pct(s.progress)} done)`;
     if (!best || score > best.score) {
@@ -907,14 +1048,15 @@ const haul: GoalFn = (a, w, ctx) => {
   const name = BLUEPRINTS[store.kind].name.toLowerCase();
   const door = () => doorSpot(w, store);
   const food = foodCount(a.inventory);
-  const siteNeedsWood = sitesOf(w).some((s) => (siteNeeds(s).wood ?? 0) > 0);
+  const siteNeedsWood = sitesOf(w, ctx.sid).some((s) => (siteNeeds(s).wood ?? 0) > 0);
+  const gather = drive(ctx.focus.gather);
   if (food >= 5 && a.needs.hunger > 0.75) {
     return {
       goal: 'haul',
       label: 'Store food',
       icon: 'food',
       score: 0.3 + workBias(a) * 0.5,
-      reason: `Carrying ${food} food the tribe could use later`,
+      reason: `Carrying ${food} food the others could use later`,
       targetLabel: `The ${name}`,
       target: store,
       key: `haul:store:${store.id}`,
@@ -922,17 +1064,18 @@ const haul: GoalFn = (a, w, ctx) => {
       build: () => [new MoveTo(door, `the ${name}`, { arrive: 0.5 }), new Store(store.id, FOOD_ITEMS)],
     };
   }
-  if (a.inventory.wood > 0 && !siteNeedsWood) {
+  if ((a.inventory.wood > 0 && !siteNeedsWood) || a.inventory.stone > 0 || a.inventory.crystal > 0) {
+    const what = a.inventory.crystal > 0 ? 'crystal' : a.inventory.stone > 0 ? 'stone' : 'logs';
     return {
       goal: 'haul',
-      label: 'Store wood',
+      label: 'Store materials',
       icon: 'wood',
       score: 0.26,
-      reason: `Carrying ${a.inventory.wood} spare logs`,
+      reason: `Carrying spare ${what}`,
       targetLabel: `The ${name}`,
       target: store,
       key: `haul:wood:${store.id}`,
-      build: () => [new MoveTo(door, `the ${name}`, { arrive: 0.5 }), new Store(store.id, ['wood'])],
+      build: () => [new MoveTo(door, `the ${name}`, { arrive: 0.5 }), new Store(store.id, ['wood', 'stone', 'crystal'])],
     };
   }
   const perCap = ctx.foodStored / Math.max(1, ctx.pop);
@@ -945,9 +1088,9 @@ const haul: GoalFn = (a, w, ctx) => {
         goal: 'haul',
         label: 'Stock up food',
         icon: 'food',
-        score: (0.24 + workBias(a) + (4 - perCap) * 0.015) * travel(src.d + dist(src.r, store)),
+        score: (0.24 + workBias(a) + (4 - perCap) * 0.015) * travel(src.d + dist(src.r, store)) * gather,
         reason: `The stores hold only ${ctx.foodStored} food for ${ctx.pop} people`,
-        targetLabel: `${resourceLabel(src.r)} ${describePlace(w, src.r.x, src.r.z)} → ${BLUEPRINTS[store.kind].name}`,
+        targetLabel: `${resourceLabel(src.r)} ${describePlace(w, src.r.x, src.r.z, false, a)} → ${BLUEPRINTS[store.kind].name}`,
         target: src.r,
         targetId: src.r.id,
         key: `haul:food:${src.r.id}`,
@@ -957,7 +1100,28 @@ const haul: GoalFn = (a, w, ctx) => {
       };
     }
   }
-  if (store.kind === 'storage' && tribeStored(w, 'wood') < 6 && !siteNeedsWood) {
+  const wantStone = ctx.civ?.objectives.some((o) => o.kind === 'GATHER_MATERIALS') || sitesOf(w, ctx.sid).some((st) => (siteNeeds(st).stone ?? 0) > 0);
+  if (store.kind === 'storage' && wantStone && settlementStored(w, ctx.sid, 'stone') < 10) {
+    const rock = pickSource(a, w, 'stone', store, 60);
+    if (rock) {
+      const n = Math.min(rock.amount, 3);
+      return {
+        goal: 'haul',
+        label: 'Quarry stone',
+        icon: 'build',
+        score: (0.2 + workBias(a)) * drive(ctx.focus.build) * travel(dist(a, rock) + dist(rock, store)),
+        reason: 'The builders need stone',
+        targetLabel: `${resourceLabel(rock)} → ${BLUEPRINTS[store.kind].name}`,
+        target: rock,
+        targetId: rock.id,
+        key: `haul:stone:${rock.id}`,
+        claims: { resource: rock.id },
+        thought: pickLine(a, ['Stone for the builders.', 'Heavy work, but someone has to do it.']),
+        build: () => [...woodTrip(a, w, rock, n, 'stone'), new MoveTo(door, `the ${name}`, { arrive: 0.5 }), new Store(store.id, ['stone'])],
+      };
+    }
+  }
+  if (store.kind === 'storage' && settlementStored(w, ctx.sid, 'wood') < 6 && !siteNeedsWood) {
     const tree = pickTree(a, w, store, 35);
     if (tree) {
       const n = Math.min(tree.amount, 4);
@@ -986,7 +1150,7 @@ const tendFire: GoalFn = (a, w, ctx) => {
   const h = ctx.hour;
   const evening = h >= 15 && h < 22.5;
   if (!evening && fire.fuel > 0.1) return null;
-  if (w.agents.some((o) => o !== a && o.brain.active?.goal === 'tendFire')) return null;
+  if (ctx.mates.some((o) => o !== a && o.brain.active?.goal === 'tendFire')) return null;
   const score = 0.34 + (1 - fire.fuel) * 0.15 + (h >= 17 ? 0.08 : 0) + workBias(a) * 0.5;
   const reason = `The campfire is burning low (${pct(fire.fuel)} fuel)`;
   const seat = () => fireSeat(w, fire, a.id);
@@ -1024,26 +1188,45 @@ const tendFire: GoalFn = (a, w, ctx) => {
 // Exploration & leisure
 // ---------------------------------------------------------------------------
 
-/** Choose somewhere worth exploring: unseen land, moderately far, biased by purpose. */
-export function exploreTarget(a: Agent, w: World, purpose: 'food' | 'water' | 'any'): V2 | null {
+/**
+ * Somewhere worth exploring: unseen land (by the agent and by their people's shared map),
+ * moderately far, biased by purpose. Expeditions reach much further than everyday wandering,
+ * and head toward the region their leader wants explored.
+ */
+export function exploreTarget(a: Agent, w: World, purpose: 'food' | 'water' | 'any' | 'expedition', toward?: V2): V2 | null {
   const mem = a.memory;
+  const civ = w.civOf(a);
+  const home = campCenter(w, a.settlementId);
   let best: V2 | null = null;
   let bestS = -Infinity;
-  for (let i = 0; i < 40; i++) {
+  const far = purpose === 'expedition';
+  const ideal = far ? 110 : 34;
+  for (let i = 0; i < (far ? 60 : 40); i++) {
     const cx = Math.floor(hash01(a.id * 131 + i, Math.floor(w.time / 30)) * EXPLORE_N);
     const cz = Math.floor(hash01(a.id * 71 + i * 3, Math.floor(w.time / 30) + 7) * EXPLORE_N);
     const x = EXPLORE_ORIGIN + (cx + 0.5) * EXPLORE_CELL;
     const z = EXPLORE_ORIGIN + (cz + 0.5) * EXPLORE_CELL;
-    const p = w.nav.nearestWalkable(x, z, 4);
+    const dHome = Math.hypot(x - home.x, z - home.z);
+    if (dHome > (far ? 230 : 90)) continue;
+    const p = w.nav.nearestWalkable(x, z, 5);
     if (!p) continue;
-    const seen = mem.explored[cz * EXPLORE_N + cx]!;
-    const fresh = seen === 0 ? 1 : Math.min(0.6, (w.time - seen) / (DAY_LENGTH * 2));
+    const idx = cz * EXPLORE_N + cx;
+    const seen = mem.explored[idx]!;
+    const civSeen = civ ? civ.knowledge.map[idx]! : 0;
+    const fresh = seen === 0 ? (civSeen ? 0.55 : 1) : Math.min(0.5, (w.time - seen) / (DAY_LENGTH * 3));
     const d = dist(a, p);
-    let s = fresh * 2 - Math.abs(d - 32) / 40;
+    let s = fresh * 2 - Math.abs(d - ideal) / (far ? 90 : 40);
     const h = w.terrain.heightAt(p.x, p.z);
-    if (purpose === 'water') s += h < 6 ? 0.3 : -0.3;
-    if (purpose === 'food') s += w.terrain.moistureAt(p.x, p.z) < 0.6 && h > 1.5 ? 0.3 : 0;
-    if (a.has('timid')) s -= dist(p, w.start) / 60;
+    if (purpose === 'water') s += h < 8 ? 0.3 : -0.3;
+    if (purpose === 'food') s += w.terrain.moistureAt(p.x, p.z) > 0.35 && h > 1.5 && h < 20 ? 0.3 : 0;
+    if (toward) s -= Math.hypot(p.x - toward.x, p.z - toward.z) / (far ? 80 : 60);
+    if (a.has('timid')) s -= dHome / 60;
+    // Stay out of the lands of people they fear or were told to avoid.
+    const owner = w.territory[Math.floor((p.z + w.terrain.size / 2) / 16) * MAP_N + Math.floor((p.x + w.terrain.size / 2) / 16)] ?? -1;
+    if (owner >= 0 && civ && owner !== civ.id) {
+      const rel = civ.relations.get(owner);
+      if (rel && (rel.state === 'hostile' || civ.objectives.some((o) => o.kind === 'AVOID_CIVILIZATION' && o.civ === owner))) s -= 3;
+    }
     if (s > bestS) {
       bestS = s;
       best = p;
@@ -1052,27 +1235,86 @@ export function exploreTarget(a: Agent, w: World, purpose: 'food' | 'water' | 'a
   return best;
 }
 
+/** Share of land near home that this people have already mapped. */
+function localKnown(w: World, a: Agent, ctx: ThinkContext): number {
+  const civ = ctx.civ;
+  if (!civ) return w.exploredFraction(a);
+  const c = ctx.camp;
+  let land = 0;
+  let known = 0;
+  const r = 6;
+  const cx0 = Math.floor((c.x - EXPLORE_ORIGIN) / EXPLORE_CELL);
+  const cz0 = Math.floor((c.z - EXPLORE_ORIGIN) / EXPLORE_CELL);
+  for (let dz = -r; dz <= r; dz++) {
+    for (let dx = -r; dx <= r; dx++) {
+      const cx = cx0 + dx;
+      const cz = cz0 + dz;
+      if (cx < 0 || cz < 0 || cx >= EXPLORE_N || cz >= EXPLORE_N) continue;
+      const i = cz * EXPLORE_N + cx;
+      if (!w.exploreLand[i]) continue;
+      land++;
+      if (civ.knowledge.map[i] || a.memory.explored[i]! > 0) known++;
+    }
+  }
+  return land ? known / land : 1;
+}
+
 const explore: GoalFn = (a, w, ctx) => {
   if (!a.awake || a.needs.energy < 0.3) return null;
+  const out: Candidate[] = [];
+  const f = ctx.focus.explore;
+  // Everyday wandering near home fades once the surroundings are familiar.
   let u = 0.12 + (a.has('curious') ? 0.13 : 0) + (a.memory.knownFoodCount() < 3 ? 0.08 : 0) - (a.has('timid') ? 0.04 : 0);
-  // Once most of the island is familiar, wanderlust fades.
-  u *= 1 - w.exploredFraction(a) * 0.75;
+  u *= 1 - localKnown(w, a, ctx) * 0.8;
+  u *= 0.8 + 0.2 * f;
   if (ctx.night) u *= 0.25;
   if (ctx.rain > 0.3) u *= 0.4;
-  const dest = exploreTarget(a, w, 'any');
-  if (!dest) return null;
-  return {
-    goal: 'explore',
-    label: 'Explore',
-    icon: 'explore',
-    score: u,
-    reason: a.has('curious') ? 'Curious about what lies beyond' : a.memory.knownFoodCount() < 3 ? 'Knows too few places to find food' : 'Nothing urgent to do — time to look around',
-    targetLabel: describePlace(w, dest.x, dest.z),
-    target: dest,
-    key: `explore:${Math.round(dest.x / 10)}:${Math.round(dest.z / 10)}`,
-    thought: pickLine(a, ['I wonder what’s over that hill.', 'So much of this island is still a mystery.', 'Let’s see what’s out there.', 'Maybe I’ll find something useful.']),
-    build: () => [new Search('anything', dest, () => false)],
-  };
+  const dest = u > 0.02 ? exploreTarget(a, w, 'any') : null;
+  if (dest) {
+    out.push({
+      goal: 'explore',
+      label: 'Explore',
+      icon: 'explore',
+      score: u,
+      reason: a.has('curious') ? 'Curious about what lies beyond' : a.memory.knownFoodCount() < 3 ? 'Knows too few places to find food' : 'Nothing urgent to do, time to look around',
+      targetLabel: describePlace(w, dest.x, dest.z, false, a),
+      target: dest,
+      key: `explore:${Math.round(dest.x / 10)}:${Math.round(dest.z / 10)}`,
+      thought: pickLine(a, ['I wonder what is over that hill.', 'So much of this land is still a mystery.', "Let's see what's out there.", 'Maybe I will find something useful.']),
+      build: () => [new Search('anything', dest, () => false)],
+    });
+  }
+  // Expeditions: a few bold people travel far on behalf of everyone.
+  const civ = ctx.civ;
+  if (civ && !a.isChild && !ctx.isLeader && !ctx.night && a.needs.energy > 0.55 && a.needs.hunger > 0.45 && a.needs.thirst > 0.45) {
+    const objective = civ.objectives.find((o) => o.kind === 'EXPLORE_REGION' || o.kind === 'ESTABLISH_SETTLEMENT' || o.kind === 'EXPAND');
+    const wanted = Math.round((f - 0.6) * 2 + (objective ? 1 : 0) + ctx.pop / 14);
+    const current = civ.members.filter((o) => o.alive && o.brain.active?.key.startsWith('expedition')).length;
+    const aptitude = (a.has('curious') ? 0.12 : 0) + (a.has('brave') ? 0.08 : 0) - (a.has('timid') ? 0.15 : 0) - (a.news.length ? 0.2 : 0);
+    if (current < wanted && ctx.pop >= 4) {
+      const region = objective?.region !== undefined ? w.terrain.regions[objective.region] : undefined;
+      const toward = region ? { x: region.x, z: region.z } : objective?.target;
+      const far = exploreTarget(a, w, 'expedition', toward);
+      if (far) {
+        const home = ctx.camp;
+        const whereName = region?.name ?? describePlace(w, far.x, far.z, false, a);
+        out.push({
+          goal: 'explore',
+          label: 'Lead an expedition',
+          icon: 'explore',
+          score: (0.3 + aptitude) * (0.7 + 0.3 * f) + (objective ? 0.08 : 0),
+          reason: objective ? `${civ.objectives.includes(objective) ? 'The leader' : 'The people'} want${objective ? 's' : ''} to know ${region ? region.name : 'what lies beyond'}` : 'Their people want to know what lies beyond the horizon',
+          targetLabel: whereName,
+          target: far,
+          key: `expedition:${Math.round(far.x / 20)}:${Math.round(far.z / 20)}`,
+          thought: pickLine(a, ['I will see what nobody has seen.', 'Pack light, walk far.', `They say ${whereName} is out there somewhere.`, 'Someone has to go. It might as well be me.']),
+          build: () => [new Search('anything', far, () => false), new MoveTo(() => w.nav.nearestWalkable(home.x + 2, home.z + 2, 8), 'home', { arrive: 3 })],
+          onComplete: (ag) => `Back from the expedition with ${ag.news.length ? 'news' : 'tired feet'}.`,
+        });
+      }
+    }
+  }
+  return out;
 };
 
 const idle: GoalFn = (a, w, ctx) => {
@@ -1088,7 +1330,7 @@ const idle: GoalFn = (a, w, ctx) => {
     label: 'Relax',
     icon: 'idle' as const,
     score: 0.05,
-    reason: a.isChild ? 'Too young to work — staying near family' : 'Needs are met and there is no pressing work',
+    reason: a.isChild ? 'Too young to work, staying near family' : 'Needs are met and there is no pressing work',
     key: 'idle',
   };
   // Stargazing on clear evenings.
@@ -1120,15 +1362,19 @@ const idle: GoalFn = (a, w, ctx) => {
     }
     if (best && bd < 40) {
       const b: V2 = best;
-      const sea = { x: b.x * 1.4, z: b.z * 1.4 };
+      let sea = { x: b.x, z: b.z };
+      for (let k = 0; k < 8; k++) {
+        const ang = (k / 8) * Math.PI * 2;
+        if (w.terrain.heightAt(b.x + Math.cos(ang) * 8, b.z + Math.sin(ang) * 8) < -0.2) sea = { x: b.x + Math.cos(ang) * 8, z: b.z + Math.sin(ang) * 8 };
+      }
       return {
         ...base,
         label: 'Watch the waves',
         icon: 'idle',
-        targetLabel: `The beach (${Math.round(bd)}m)`,
+        targetLabel: `The shore (${Math.round(bd)}m)`,
         target: b,
-        thought: pickLine(a, ['The sea is calm today.', 'I love the sound of the waves.', 'Somewhere out there is where we came from.']),
-        build: () => [new MoveTo(() => b, 'the beach', { arrive: 1 }), new Rest(20 + roll * 15, 'sit', 'Watching the waves', sea)],
+        thought: pickLine(a, ['The sea is calm today.', 'I love the sound of the waves.', 'What is on the other side of the sea?']),
+        build: () => [new MoveTo(() => b, 'the shore', { arrive: 1 }), new Rest(20 + roll * 15, 'sit', 'Watching the waves', sea)],
       };
     }
   }
@@ -1141,16 +1387,16 @@ const idle: GoalFn = (a, w, ctx) => {
     ...base,
     targetLabel: parent ? `Near ${parent.name}` : home ? 'Near home' : 'Around camp',
     target: spot,
-    thought: a.isChild ? pickLine(a, ['Where did everyone go?', 'I want to help too!', 'When I grow up I will build a hut.']) : pickLine(a, ['What a lovely day.', 'Nothing to do for a moment. Nice.', 'I could get used to island life.', 'Listening to the birds...']),
+    thought: a.isChild ? pickLine(a, ['Where did everyone go?', 'I want to help too!', 'When I grow up I will build a house.']) : pickLine(a, ['What a lovely day.', 'Nothing to do for a moment. Nice.', 'I could get used to this.', 'Listening to the birds...']),
     build: () => [new MoveTo(() => spot, 'a quiet spot', { arrive: 0.6 }), new Rest(6 + hash01(a.id, 99) * 6, sit ? 'sit' : 'look', sit ? 'Sitting down for a while' : 'Taking in the view')],
   };
 };
 
 const pray: GoalFn = (a, w, ctx) => {
   if (!a.awake || a.faith < 0.12 || (a.isChild && a.age < 6)) return null;
-  const shrine = w.structures.find((s) => s.kind === 'shrine' && s.complete);
+  const shrine = w.structures.find((s) => (s.kind === 'monument' || s.kind === 'shrine') && s.complete && s.settlementId === ctx.sid);
   if (!shrine) return null;
-  let u = a.faith * 0.22;
+  let u = a.faith * 0.22 * drive(ctx.focus.faith);
   if (a.needs.safety < 0.65) u += (0.65 - a.needs.safety) * 0.9;
   const h = ctx.hour;
   if ((h >= 6 && h < 7.5) || (h >= 18 && h < 19.5)) u += 0.12 * a.faith;
@@ -1159,20 +1405,96 @@ const pray: GoalFn = (a, w, ctx) => {
   if (u < 0.08) return null;
   const d = dist(a, shrine);
   const spot = () => workSpot(w, shrine, a.id);
+  const place = shrine.kind === 'monument' ? 'the Sky Altar' : 'the shrine';
   return {
     goal: 'pray',
     label: 'Pray',
     icon: 'star',
     score: u * travel(d),
     reason: a.needs.safety < 0.5 ? 'Frightened, and hoping for protection' : grief ? 'Mourning a loss' : 'Giving thanks to whoever watches over them',
-    targetLabel: `The shrine (${Math.round(d)}m)`,
+    targetLabel: `${place.charAt(0).toUpperCase()}${place.slice(1)} (${Math.round(d)}m)`,
     target: shrine,
     key: 'pray',
     thought: pickLine(a, ['Whoever you are up there... thank you.', 'Please keep us safe.', 'I know someone is watching.', 'Give us good harvests.']),
-    build: () => [new MoveTo(spot, 'the shrine', { arrive: 0.5 }), new Pray(shrine.id, 14 + hash01(a.id, 5) * 8)],
+    build: () => [new MoveTo(spot, place, { arrive: 0.5 }), new Pray(shrine.id, 14 + hash01(a.id, 5) * 8)],
     onComplete: (ag, wd) => {
       ag.brain.cooldowns.set('pray', wd.time + DAY_LENGTH * 0.4);
-      return 'Prayed at the shrine and felt calmer.';
+      return `Prayed at ${place} and felt calmer.`;
+    },
+  };
+};
+
+/** The faithful travel to sacred wonders their people know of. */
+const pilgrimage: GoalFn = (a, w, ctx) => {
+  const civ = ctx.civ;
+  if (!civ || !a.awake || ctx.night || a.faith < 0.35 || a.needs.energy < 0.5 || a.needs.hunger < 0.5 || a.needs.thirst < 0.5) return null;
+  let best: { l: (typeof w.terrain.landmarks)[number]; d: number } | null = null;
+  for (const id of civ.knowledge.landmarks) {
+    const l = w.terrain.landmarks.find((x) => x.id === id);
+    if (!l || !['stoneCircle', 'temple', 'greatTree', 'spring', 'floatingRocks', 'crystalSpire'].includes(l.kind)) continue;
+    const d = dist(a, l);
+    if (d > 190) continue;
+    if (!best || d < best.d) best = { l, d };
+  }
+  if (!best) return null;
+  const l = best.l;
+  const spot = w.nav.nearestWalkable(l.x + Math.cos(a.id) * (l.block + 3), l.z + Math.sin(a.id) * (l.block + 3), 8);
+  if (!spot) return null;
+  return {
+    goal: 'pray',
+    label: `Pilgrimage to ${l.name}`,
+    icon: 'star',
+    score: (0.1 + a.faith * 0.18) * drive(ctx.focus.faith) * travel(best.d * 0.6),
+    reason: `${l.name} is sacred to the ${civ.people}`,
+    targetLabel: `${l.name} (${Math.round(best.d)}m)`,
+    target: spot,
+    key: `pilgrim:${l.id}`,
+    thought: pickLine(a, [`I want to see ${l.name} with my own eyes.`, 'The old places are closer to the sky.', `They say ${LANDMARK_INFO[l.kind].title.toLowerCase()} can answer prayers.`]),
+    build: () => [new MoveTo(() => spot, l.name, { arrive: 1.2 }), new Worship(l.id, 18)],
+    onComplete: (ag, wd) => {
+      ag.brain.cooldowns.set(`pilgrim:${l.id}`, wd.time + DAY_LENGTH * 3);
+      return `Worshipped at ${l.name}.`;
+    },
+  };
+};
+
+/** Envoys carry gifts to another people (trade or peace-making, as the leader wishes). */
+const envoy: GoalFn = (a, w, ctx) => {
+  const civ = ctx.civ;
+  if (!civ || a.isChild || ctx.isLeader || !a.awake || ctx.night || a.needs.energy < 0.55 || a.needs.hunger < 0.5 || a.needs.thirst < 0.5) return null;
+  const o = civ.objectives.find((x) => (x.kind === 'TRADE' || x.kind === 'SEEK_PEACE') && x.civ !== undefined);
+  if (!o) return null;
+  const other = w.civs[o.civ!];
+  if (!other || !other.capital) return null;
+  if (civ.members.some((m) => m !== a && m.alive && m.brain.active?.goal === 'envoy')) return null;
+  if (onCooldown(a, `envoy:${other.id}`, ctx.now) || (civ.timers.get(`envoy:${other.id}`) ?? -Infinity) > ctx.now) return null;
+  const their = campCenter(w, other.capital.id);
+  const d = dist(a, their);
+  if (d > 420) return null;
+  const store = ctx.stores.find((s) => s.stored.wood + s.stored.berries + s.stored.fruit + s.stored.mushrooms + s.stored.stone > 3);
+  const aptitude = (a.has('sociable') ? 0.1 : 0) + (a.has('kind') ? 0.06 : 0) + (a.persona.includes('generous') ? 0.08 : 0);
+  const peace = o.kind === 'SEEK_PEACE';
+  return {
+    goal: 'envoy',
+    label: peace ? `Seek peace with ${other.name}` : `Take gifts to ${other.name}`,
+    icon: 'social',
+    score: 0.36 + aptitude,
+    reason: o.reason || (peace ? `The leader wants peace with ${other.name}` : `The leader wants friends among ${other.name}`),
+    targetLabel: `${other.capital.name} (${Math.round(d)}m)`,
+    target: their,
+    key: 'envoy',
+    thought: peace ? pickLine(a, ['Words and gifts. Better than spears.', 'I hope they listen.']) : pickLine(a, ['A long walk with a heavy basket.', 'I wonder what their homes look like.']),
+    build: () => {
+      const steps = [];
+      if (store) steps.push(new MoveTo(() => doorSpot(w, store), 'the stores', { arrive: 0.5 }), new Withdraw(store.id, 'gift', 5));
+      steps.push(new MoveTo(() => w.nav.nearestWalkable(their.x + 3, their.z + 3, 10), other.capital!.name, { arrive: 3 }), new Envoy(other.id, peace));
+      steps.push(new MoveTo(() => w.nav.nearestWalkable(ctx.camp.x + 2, ctx.camp.z + 2, 8), 'home', { arrive: 3 }));
+      return steps;
+    },
+    onComplete: (ag, wd) => {
+      ag.brain.cooldowns.set(`envoy:${other.id}`, wd.time + DAY_LENGTH);
+      civ.timers.set(`envoy:${other.id}`, wd.time + DAY_LENGTH * 0.8);
+      return `Came home from ${other.name}.`;
     },
   };
 };
@@ -1181,7 +1503,7 @@ const play: GoalFn = (a, w, ctx) => {
   if (!a.isChild || !a.awake || ctx.night || ctx.rain > 0.3) return null;
   let mate: Agent | null = null;
   let md = Infinity;
-  for (const o of w.agents) {
+  for (const o of ctx.mates) {
     if (o === a || !o.alive || !o.awake || o.inside !== null) continue;
     const d = dist(a, o);
     const kid = o.isChild;
@@ -1204,7 +1526,7 @@ const play: GoalFn = (a, w, ctx) => {
     targetLabel: m ? m.name : 'Around camp',
     target: spot,
     key: 'play',
-    thought: pickLine(a, ["Can't catch me!", 'Tag, you’re it!', 'Wheee!', 'Let’s race to the fire!']),
+    thought: pickLine(a, ["Can't catch me!", "Tag, you're it!", 'Wheee!', "Let's race to the fire!"]),
     build: () => [new MoveTo(() => spot, 'the playground', { arrive: 1, run: true }), new Play(spot, 14 + hash01(a.id, 3) * 10, m ? m.name : null)],
     onComplete: (ag, wd) => {
       ag.brain.cooldowns.set('play', wd.time + 25);
@@ -1213,7 +1535,7 @@ const play: GoalFn = (a, w, ctx) => {
 };
 
 /** Goals children never pursue. */
-export const ADULT_ONLY = new Set(['found', 'supply', 'construct', 'haul', 'tendFire', 'explore', 'help']);
+export const ADULT_ONLY = new Set(['found', 'supply', 'construct', 'haul', 'tendFire', 'explore', 'help', 'envoy']);
 
 export const GOALS: Array<{ id: string; fn: GoalFn }> = [
   { id: 'flee', fn: flee },
@@ -1226,6 +1548,7 @@ export const GOALS: Array<{ id: string; fn: GoalFn }> = [
   { id: 'help', fn: help },
   { id: 'socialize', fn: socialize },
   { id: 'pray', fn: pray },
+  { id: 'pilgrimage', fn: pilgrimage },
   { id: 'play', fn: play },
   { id: 'found', fn: found },
   { id: 'supply', fn: supply },
@@ -1233,5 +1556,6 @@ export const GOALS: Array<{ id: string; fn: GoalFn }> = [
   { id: 'haul', fn: haul },
   { id: 'tendFire', fn: tendFire },
   { id: 'explore', fn: explore },
+  { id: 'envoy', fn: envoy },
   { id: 'idle', fn: idle },
 ];

@@ -7,13 +7,22 @@ import { describePlace } from '../ai/describe';
  * A lightning strike. Everything nearby reacts: fires start, people get hurt, witnesses are
  * frightened (and, when the gods are responsible, a little more faithful).
  */
-export function lightningStrike(w: World, x: number, z: number, byGod: boolean): void {
+export interface StrikeResult {
+  hurt: number;
+  killed: number;
+  fires: number;
+  buildings: number;
+}
+
+export function lightningStrike(w: World, x: number, z: number, byGod: boolean): StrikeResult {
   w.stats.lightningStrikes++;
   w.events.emit('lightning', { x, z });
   w.events.emit('sfx', { kind: 'thunder', x, z, volume: 1 });
   w.dangers.push({ id: w.nextId(), x, z, radius: 11, ttl: 22, kind: 'lightning' });
   w.scorches.push({ id: w.nextId(), x, z, radius: 2.6, age: 0 });
   let hurt = 0;
+  let killed = 0;
+  let buildings = 0;
   for (const a of w.agents) {
     if (!a.alive || a.inside !== null) continue;
     const d = Math.hypot(a.x - x, a.z - z);
@@ -21,10 +30,12 @@ export function lightningStrike(w: World, x: number, z: number, byGod: boolean):
       a.needs.health -= 0.2 + 0.75 * (1 - d / 2.4);
       a.knocked = 5;
       hurt++;
-      a.addLog(w.time, 'event', 'Struck by lightning!');
+      a.addLog(w.now(a), 'event', 'Struck by lightning!');
+      if (a.protectedUntil > w.worldTime) a.needs.health = Math.max(0.3, a.needs.health);
       if (a.needs.health <= 0) {
         a.needs.health = 0;
         kill(a, w, 'lightning');
+        killed++;
         continue;
       }
       w.log(`${a.name} was struck by lightning!`, 'lightning', 3, a, a.id);
@@ -35,11 +46,11 @@ export function lightningStrike(w: World, x: number, z: number, byGod: boolean):
     if (d < 24) {
       const fear = 0.6 * (1 - d / 24) * (a.has('timid') ? 1.3 : a.has('brave') ? 0.6 : 1);
       a.needs.safety = Math.max(0, a.needs.safety - fear);
-      a.emote = { icon: 'warning', until: w.time + 3 };
-      if (d >= 2.4) a.addLog(w.time, 'event', d < 8 ? 'Lightning struck right next to me!' : 'Saw lightning strike nearby.');
-      a.memory.addDanger({ x, z, at: w.time, kind: 'lightning' });
+      a.emote = { icon: 'warning', until: w.now(a) + 3 };
+      if (d >= 2.4) a.addLog(w.now(a), 'event', d < 8 ? 'Lightning struck right next to me!' : 'Saw lightning strike nearby.');
+      a.memory.addDanger({ x, z, at: w.now(a), kind: 'lightning' });
       if (byGod) a.faith = Math.min(1, a.faith + 0.06);
-      a.brain.nextThink = w.time;
+      a.brain.nextThink = w.now(a);
     }
   }
   let fires = 0;
@@ -54,13 +65,17 @@ export function lightningStrike(w: World, x: number, z: number, byGod: boolean):
   });
   for (const s of w.structures) {
     const d = Math.hypot(s.x - x, s.z - z);
-    if (d < 3.2 && w.rainAt(s.x, s.z) < 0.5) igniteStructure(w, s);
+    if (d < 3.2 && w.rainAt(s.x, s.z) < 0.5) {
+      igniteStructure(w, s);
+      buildings++;
+    }
   }
   if (!hurt) {
     const what = byGod ? 'Lightning strikes' : 'Lightning from the storm strikes';
-    if (fires) w.log(`${what} ${describePlace(w, x, z)} — fire!`, 'lightning', 2, { x, z });
+    if (fires) w.log(`${what} ${describePlace(w, x, z)}. Fire!`, 'lightning', 2, { x, z });
     else if (byGod) w.log(`${what} ${describePlace(w, x, z)}.`, 'lightning', 1, { x, z });
   }
+  return { hurt, killed, fires, buildings };
 }
 
 

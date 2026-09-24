@@ -23,7 +23,8 @@ export type GoalId =
   | 'idle'
   | 'pray'
   | 'play'
-  | 'recover';
+  | 'recover'
+  | 'envoy';
 
 export type IconId =
   | 'food'

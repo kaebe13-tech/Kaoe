@@ -4,6 +4,8 @@ import { Memory } from './Memory';
 import { TRAITS, TRAIT_IDS, type TraitId } from './traits';
 import type { V2 } from '../core/math';
 import { newBrain, type BrainState } from '../ai/brainCore';
+import { CULTURES, type CultureId } from '../civ/cultures';
+import type { PersonaTrait } from '../civ/persona';
 
 export interface Needs {
   hunger: number;
@@ -18,12 +20,27 @@ export type NeedKey = keyof Needs;
 export interface Appearance {
   skin: number;
   hair: number;
+  /** 0 short, 1 long, 2 bun, 3 ponytail, 4 braids, 5 shaved, 6 curly. */
   hairStyle: number;
   shirt: number;
   pants: number;
+  /** Trim / belt / accent colour. */
+  trim: number;
+  /** 0 tunic, 1 robe, 2 wrap, 3 vest. */
+  garment: number;
+  /** 0 none, 1 hood, 2 band, 3 cap, 4 feather, 5 straw hat, 6 circlet. */
+  headwear: number;
+  /** 0 none, 1 satchel, 2 scarf, 3 necklace. */
+  accessory: number;
+  beard: boolean;
+  /** Face variant (brows/eyes). */
+  face: number;
   height: number;
   build: number;
 }
+
+export const GARMENTS = ['tunic', 'robe', 'wrap', 'vest'] as const;
+export const HEADWEAR = ['none', 'hood', 'band', 'cap', 'feather', 'strawhat', 'circlet'] as const;
 
 export type AnimState =
   | 'idle'
@@ -48,6 +65,11 @@ export type AnimState =
   | 'catchRain'
   | 'play'
   | 'stargaze'
+  | 'carry'
+  | 'mine'
+  | 'wade'
+  | 'wave'
+  | 'threaten'
   | 'hidden';
 
 export type NavStatus = 'idle' | 'pending' | 'moving' | 'arrived' | 'failed';
@@ -103,9 +125,22 @@ export class Agent {
   age: number;
   /** 0..1 belief that someone watches over the island; grows when miracles are witnessed. */
   faith = 0;
-  /** Ids of the parents for children born on the island. */
+  /** Ids of the parents for children born in the world. */
   parents: number[] = [];
   bornAt = 0;
+  /** Civilization and settlement this person belongs to. */
+  civId = -1;
+  settlementId = -1;
+  /** Leader-level personality (matters most if they come to lead). */
+  persona: PersonaTrait[] = [];
+  /** Things seen far from home, to tell the others about on return. */
+  news: Array<{ kind: 'landmark' | 'region' | 'prospect'; id: number; at?: V2; score?: number; note?: string }> = [];
+  /** Landmarks this person has seen with their own eyes. */
+  seenLandmarks = new Set<number>();
+  /** Divine blessing/curse/protection (world time it wears off). */
+  blessedUntil = 0;
+  cursedUntil = 0;
+  protectedUntil = 0;
 
   x: number;
   z: number;
@@ -223,13 +258,25 @@ export function randomTraits(rng: Rng): TraitId[] {
   return out;
 }
 
-export function randomAppearance(rng: Rng): Appearance {
+export function randomAppearance(rng: Rng, culture?: CultureId): Appearance {
+  const c = culture ? CULTURES[culture] : null;
+  const garments = c ? c.garments : (['tunic', 'robe', 'wrap', 'vest'] as const);
+  const heads = c ? c.headwear : (['none'] as const);
+  const garment = GARMENTS.indexOf(rng.pick(garments));
+  const headwear = HEADWEAR.indexOf(rng.pick(heads));
+  const long = rng.chance(0.5);
   return {
-    skin: rng.pick(SKINS),
-    hair: rng.pick(HAIRS),
-    hairStyle: rng.int(0, 4),
-    shirt: rng.pick(SHIRTS),
+    skin: rng.pick(c ? c.skin : SKINS),
+    hair: rng.chance(0.85) && c ? rng.pick(c.hair) : rng.pick(HAIRS),
+    hairStyle: long ? rng.pick([1, 2, 3, 4, 6]) : rng.pick([0, 0, 5, 6]),
+    shirt: rng.pick(c ? c.cloth : SHIRTS),
     pants: rng.pick(PANTS),
+    trim: rng.pick(c ? c.trim : [0x6b4a2a, 0xf1e3c2]),
+    garment: garment < 0 ? 0 : garment,
+    headwear: headwear < 0 ? 0 : headwear,
+    accessory: rng.chance(0.55) ? rng.int(1, 3) : 0,
+    beard: !long && rng.chance(0.3),
+    face: rng.int(0, 3),
     height: rng.range(0.92, 1.08),
     build: rng.range(0.9, 1.12),
   };

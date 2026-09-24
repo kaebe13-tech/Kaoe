@@ -1,5 +1,6 @@
 import { hash01 } from '../core/rng';
-import { DAY_LENGTH, HOUR } from '../world/config';
+import { DAY_LENGTH, HOUR, MAP_CELL, MAP_N, WORLD_HALF } from '../world/config';
+import { effectiveSpeed } from '../civ/timeScale';
 import { BLUEPRINTS } from './blueprints';
 import { TreeVariant, type ResourceNode, type Structure } from './types';
 import type { World } from './World';
@@ -21,14 +22,30 @@ export class Ecology {
     }
   }
 
+  private wearT = 0;
+  /** Growth multiplier per civilization (its time bubble covers its own land). */
+  private readonly civRate: number[] = [];
+
+  /** How fast plants grow at a point: time runs at the local civilization's speed on its land. */
+  private rateAt(w: World, x: number, z: number): number {
+    const cx = Math.floor((x + WORLD_HALF) / MAP_CELL);
+    const cz = Math.floor((z + WORLD_HALF) / MAP_CELL);
+    if (cx < 0 || cz < 0 || cx >= MAP_N || cz >= MAP_N) return 1;
+    const owner = w.territory[cz * MAP_N + cx]!;
+    return owner >= 0 ? (this.civRate[owner] ?? 1) : 1;
+  }
+
   private tick(w: World, dt: number): void {
+    for (const c of w.civs) this.civRate[c.id] = effectiveSpeed(c, w.worldTime);
     for (const r of w.resources.values()) {
       if (r.burning > 0) {
         this.burnResource(w, r, dt);
         continue;
       }
       if (r.kind === 'rock') continue;
-      this.grow(w, r, dt);
+      if (r.state === 'grown' && r.amount >= r.max && !r.blessed) continue;
+      const rate = this.rateAt(w, r.x, r.z);
+      if (rate > 0) this.grow(w, r, dt * rate);
     }
     for (const s of [...w.structures]) this.updateStructure(w, s, dt);
     for (let i = w.dangers.length - 1; i >= 0; i--) {
@@ -42,17 +59,21 @@ export class Ecology {
       if (s.age > DAY_LENGTH * 1.5) w.scorches.splice(i, 1);
     }
     // Paths slowly grow back over when nobody walks them.
-    const decay = (dt / DAY_LENGTH) * 0.18;
-    const wear = w.wear;
-    let any = false;
-    for (let i = 0; i < wear.length; i++) {
-      const v = wear[i]!;
-      if (v > 0) {
-        wear[i] = v > decay ? v - decay : 0;
-        any = true;
+    this.wearT += dt;
+    if (this.wearT >= 5) {
+      const decay = (this.wearT / DAY_LENGTH) * 0.14;
+      this.wearT = 0;
+      const wear = w.wear;
+      let any = false;
+      for (let i = 0; i < wear.length; i++) {
+        const v = wear[i]!;
+        if (v > 0) {
+          wear[i] = v > decay ? v - decay : 0;
+          any = true;
+        }
       }
+      if (any) w.wearDirty = true;
     }
-    if (any) w.wearDirty = true;
   }
 
   private grow(w: World, r: ResourceNode, dt: number): void {
@@ -63,6 +84,8 @@ export class Ecology {
       let perUnit: number;
       if (r.kind === 'berryBush') perUnit = HOUR * 3;
       else if (r.kind === 'fruitTree') perUnit = HOUR * 5;
+      else if (r.kind === 'mushroom') perUnit = HOUR * 4;
+      else if (r.kind === 'crystal') perUnit = HOUR * 30 * (nearSpire(w, r) ? 0.25 : 1);
       else return; // trees don't regrow wood while standing
       r.regrow += (dt / perUnit) * boost;
       if (r.regrow >= 1) {
@@ -73,8 +96,18 @@ export class Ecology {
       return;
     }
     if (r.state === 'stump' || r.state === 'burnt') {
+      if (r.kind === 'crystal') {
+        // Crystal slowly grows back from its shards.
+        r.regrow += (dt / (DAY_LENGTH * (nearSpire(w, r) ? 0.8 : 2.5))) * boost;
+        if (r.regrow >= 1) {
+          r.regrow = 0;
+          r.amount = 2;
+          w.setResourceState(r, 'grown', 1);
+        }
+        return;
+      }
       // Land cleared for the camp stays cleared.
-      for (const s of w.structures) if (Math.hypot(s.x - r.x, s.z - r.z) < BLUEPRINTS[s.kind].radius + 5) return;
+      for (const s of w.structures) if (Math.abs(s.x - r.x) < 12 && Math.abs(s.z - r.z) < 12 && Math.hypot(s.x - r.x, s.z - r.z) < BLUEPRINTS[s.kind].radius + 5) return;
       const wait = (r.state === 'burnt' ? 1.4 : 1.1) * DAY_LENGTH * (0.8 + hash01(r.id, 17) * 0.5);
       r.regrow += (dt / wait) * boost;
       if (r.regrow >= 1) {
@@ -133,14 +166,17 @@ export class Ecology {
 
   private updateStructure(w: World, s: Structure, dt: number): void {
     if (s.kind === 'campfire' && s.complete) {
-      const h = w.hour;
+      // The fire burns on its owners' clock.
+      const h = w.hourOf(s.civId);
+      const civ = w.civs[s.civId];
+      const rate = civ ? this.civRate[civ.id] ?? 1 : 1;
       const rain = w.rainAt(s.x, s.z);
       const wantLit = (h >= 17.5 || h < 6.5) && s.fuel > 0 && rain < 0.55;
       if (wantLit !== s.lit) {
         s.lit = wantLit;
         w.events.emit('structureChanged', s);
       }
-      if (s.lit) s.fuel = Math.max(0, s.fuel - (dt / HOUR) * 0.075 * (1 + rain));
+      if (s.lit) s.fuel = Math.max(0, s.fuel - (dt / HOUR) * 0.075 * (1 + rain) * rate);
     }
     if (s.burning > 0) {
       const rain = w.rainAt(s.x, s.z);
@@ -155,7 +191,8 @@ export class Ecology {
       }
       if (s.damage >= 1) {
         const bp = BLUEPRINTS[s.kind];
-        w.log(`The ${bp.name.toLowerCase()} burned to the ground.`, 'fire', 3, s);
+        const owner = w.civs[s.civId];
+        w.log(`${owner ? `${owner.name}'s` : 'The'} ${bp.name.toLowerCase()} burned to the ground.`, 'fire', 3, s);
         w.events.emit('fx', { kind: 'smoke', x: s.x, z: s.z, y: 1.5, count: 16 });
         w.removeStructure(s);
         return;
@@ -187,3 +224,8 @@ export function igniteStructure(w: World, s: Structure): void {
 }
 
 export type { Structure };
+
+function nearSpire(w: World, r: ResourceNode): boolean {
+  for (const l of w.terrain.landmarks) if (l.kind === 'crystalSpire' && Math.hypot(l.x - r.x, l.z - r.z) < 40) return true;
+  return false;
+}

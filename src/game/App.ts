@@ -1,3 +1,4 @@
+import { daylightAt } from '../sim/time';
 import { Game } from './Game';
 import { UI } from '../ui/UI';
 import { World } from '../sim/World';
@@ -7,7 +8,6 @@ import { loadFromSlot, saveToSlot, slotMeta } from '../save/SaveSystem';
 import { h } from '../ui/dom';
 import { AudioSystem } from '../audio/AudioSystem';
 import { DebugTools } from '../debug/DebugTools';
-import { campfire } from '../sim/settlement';
 
 const AUTOSAVE_EVERY = 180; // real seconds
 
@@ -139,11 +139,10 @@ export class App {
         if (r.kind === 'tree' && r.state === 'grown') trees++;
         if (r.burning > 0) fire += 0.3;
       });
-      const cf = campfire(w);
-      if (cf?.lit) fire += Math.max(0, 1 - Math.hypot(cf.x - f.x, cf.z - f.z) / 25) * 0.6;
+      for (const cf of w.structures) if (cf.kind === 'campfire' && cf.lit) fire += Math.max(0, 1 - Math.hypot(cf.x - f.x, cf.z - f.z) / 25) * 0.6;
       for (const s of w.structures) if (s.burning > 0 && Math.hypot(s.x - f.x, s.z - f.z) < 40) fire += 0.6;
       this.env = {
-        daylight: w.daylight,
+        daylight: daylightAt(w.worldHour),
         rain: Math.max(w.rainAt(f.x, f.z), w.weather.anyRain * 0.25),
         oceanNear: h < 2 ? 1 : Math.max(0, 1 - (h - 2) / 8),
         fire: Math.min(1, fire),

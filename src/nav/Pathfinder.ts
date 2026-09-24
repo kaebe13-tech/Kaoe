@@ -37,7 +37,10 @@ export class Pathfinder {
   }
 
   /** Returns world-space waypoints (excluding the start) or null if unreachable. */
-  find(from: V2, to: V2, maxExpansions = 60000): V2[] | null {
+  /** Heuristic weight for the current search (>1 trades optimality for speed on long trips). */
+  private hw = 1.001;
+
+  find(from: V2, to: V2, maxExpansions = 120000): V2[] | null {
     const grid = this.grid;
     this.stats.searches++;
     const start = grid.walkable(from.x, from.z) ? from : grid.nearestWalkable(from.x, from.z, 6);
@@ -54,7 +57,14 @@ export class Pathfinder {
     const gz = grid.cellZ(goal.z);
     const sIdx = sz * size + sx;
     const gIdx = gz * size + gx;
+    if (grid.component[sIdx] !== grid.component[gIdx]) {
+      this.stats.failures++;
+      return null;
+    }
     if (sIdx === gIdx) return [{ x: goal.x, z: goal.z }];
+    // Long journeys use a mildly greedy heuristic: routes stay natural, searches stay small.
+    const straight = Math.hypot(gx - sx, gz - sz);
+    this.hw = straight > 160 ? 1.5 : straight > 60 ? 1.25 : 1.001;
 
     this.gen++;
     if (this.gen >= 0xfffffff0) {
@@ -124,7 +134,7 @@ export class Pathfinder {
   private h(ax: number, az: number, bx: number, bz: number): number {
     const dx = Math.abs(ax - bx);
     const dz = Math.abs(az - bz);
-    return (dx + dz + (SQRT2 - 2) * Math.min(dx, dz)) * 1.001;
+    return (dx + dz + (SQRT2 - 2) * Math.min(dx, dz)) * this.hw;
   }
 
   /** Greedy string pulling: skip waypoints while there is clear line of sight. */
@@ -135,7 +145,7 @@ export class Pathfinder {
     while (anchor < pts.length - 1) {
       let next = anchor + 1;
       // Look ahead as far as visible (bounded so we don't cut across very long detours).
-      for (let j = Math.min(pts.length - 1, anchor + 40); j > anchor + 1; j--) {
+      for (let j = Math.min(pts.length - 1, anchor + 60); j > anchor + 1; j--) {
         if (this.grid.lineOfSight(pts[anchor]!.x, pts[anchor]!.z, pts[j]!.x, pts[j]!.z)) {
           next = j;
           break;

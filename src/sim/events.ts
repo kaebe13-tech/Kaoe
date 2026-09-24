@@ -19,7 +19,14 @@ export type FeedIcon =
   | 'sleep'
   | 'heart'
   | 'shrine'
-  | 'bless';
+  | 'bless'
+  | 'crown'
+  | 'contact'
+  | 'discovery'
+  | 'divine'
+  | 'stone'
+  | 'crystal'
+  | 'time';
 
 export interface FeedEvent {
   text: string;
@@ -30,6 +37,8 @@ export interface FeedEvent {
   agentId?: number;
   /** 1 = minor, 2 = notable, 3 = major */
   importance: 1 | 2 | 3;
+  /** Civilization the event concerns (if any). */
+  civId?: number;
 }
 
 export type SfxKind =
@@ -49,7 +58,14 @@ export type SfxKind =
   | 'talk'
   | 'deposit'
   | 'death'
-  | 'yelp';
+  | 'yelp'
+  | 'mine'
+  | 'chime'
+  | 'rumble'
+  | 'impact'
+  | 'wind'
+  | 'choir'
+  | 'horn';
 
 export interface SfxEvent {
   kind: SfxKind;
@@ -58,7 +74,7 @@ export interface SfxEvent {
   volume?: number;
 }
 
-export type FxKind = 'woodChips' | 'leaves' | 'berryPop' | 'dust' | 'buildDust' | 'splash' | 'sparkle' | 'smoke' | 'hearts' | 'zzz' | 'embers';
+export type FxKind = 'woodChips' | 'leaves' | 'berryPop' | 'dust' | 'buildDust' | 'splash' | 'sparkle' | 'smoke' | 'hearts' | 'zzz' | 'embers' | 'stoneChips' | 'crystalShards' | 'steam' | 'glow' | 'divine' | 'quake' | 'meteor' | 'wind' | 'bloom' | 'anger';
 
 export interface FxEvent {
   kind: FxKind;
@@ -82,4 +98,7 @@ export interface SimEvents {
   agentAdded: Agent;
   agentDied: Agent;
   lightning: { x: number; z: number };
+  /** A civilization-level event (first contact, new leader...) the UI may want to spotlight. */
+  civEvent: { civId: number; kind: string; text: string; x?: number; z?: number; other?: number };
+  territory: void;
 }

@@ -8,6 +8,7 @@ import { adopt } from '../src/ai/brainCore';
 import { Rest } from '../src/ai/actions';
 import { deliverToSite, workOnSite } from '../src/sim/construction';
 import { chooseSite } from '../src/sim/settlement';
+import { effectiveSpeed } from '../src/sim/Simulation';
 
 function run(w: World, seconds: number): Simulation {
   const sim = new Simulation(w);
@@ -28,13 +29,31 @@ describe('world generation', () => {
     expect(sum(c)).not.toBe(sum(a));
   });
 
-  it('has fresh water, food and trees', () => {
+  it('has fresh water, food, trees, stone, crystal, rivers and landmarks', () => {
     const w = new World(7);
-    expect(w.water.length).toBeGreaterThanOrEqual(2);
-    expect(w.water.every((p) => p.spots.length > 5)).toBe(true);
+    expect(w.water.filter((p) => p.kind === 'lake').length).toBeGreaterThanOrEqual(4);
+    expect(w.water.filter((p) => p.kind === 'river').length).toBeGreaterThan(10);
+    expect(w.water.every((p) => p.spots.length > 0)).toBe(true);
     const kinds = new Set([...w.resources.values()].map((r) => r.kind));
-    expect(kinds.has('tree') && kinds.has('berryBush') && kinds.has('fruitTree')).toBe(true);
-    expect(w.nav.walkable(w.start.x, w.start.z)).toBe(true);
+    for (const k of ['tree', 'berryBush', 'fruitTree', 'rock', 'mushroom', 'crystal'] as const) expect(kinds.has(k)).toBe(true);
+    expect(w.terrain.rivers.length).toBe(3);
+    expect(w.terrain.landmarks.length).toBeGreaterThanOrEqual(8);
+    expect(w.sites.length).toBeGreaterThanOrEqual(4);
+    for (const s of w.sites) expect(w.nav.walkable(s.x, s.z)).toBe(true);
+  });
+
+  it('rivers flow downhill into the sea', () => {
+    const w = new World(7);
+    for (const r of w.terrain.rivers) {
+      for (let i = 1; i < r.points.length; i++) expect(r.points[i]!.level).toBeLessThanOrEqual(r.points[i - 1]!.level + 1e-6);
+      expect(r.points[r.points.length - 1]!.level).toBeLessThan(0.2);
+    }
+  });
+
+  it('homelands are reachable from one another over land', () => {
+    const w = new World(1337);
+    const [a, ...rest] = w.sites.slice(0, 4);
+    for (const b of rest) expect(w.nav.connected(a!.x, a!.z, b.x, b.z)).toBe(true);
   });
 });
 
@@ -114,9 +133,10 @@ describe('construction', () => {
     const w = new World(9);
     w.spawnTribe(2);
     const [a, b] = w.agents as [typeof w.agents[0], typeof w.agents[0]];
-    const fireSpot = chooseSite(w, 'campfire', w.start)!;
+    const sid = a!.settlementId;
+    const fireSpot = chooseSite(w, 'campfire', sid, w.start)!;
     w.createStructure('campfire', fireSpot.x, fireSpot.z, 0, a!.id).complete = true;
-    const spot = chooseSite(w, 'hut')!;
+    const spot = chooseSite(w, 'hut', sid)!;
     expect(spot).not.toBeNull();
     const hut = w.createStructure('hut', spot.x, spot.z, spot.rot, a!.id);
     expect(workOnSite(w, hut, a!, 5)).toBe('blocked');
@@ -138,7 +158,12 @@ describe('save and load', () => {
     run(w, HOUR * 5);
     const data = JSON.parse(JSON.stringify(serialize(w)));
     const w2 = deserialize(data);
-    expect(w2.time).toBe(w.time);
+    expect(w2.worldTime).toBe(w.worldTime);
+    expect(w2.civs.length).toBe(w.civs.length);
+    expect(w2.civs[0]!.clock).toBe(w.civs[0]!.clock);
+    expect(w2.civs[0]!.leaderId).toBe(w.civs[0]!.leaderId);
+    expect(w2.civs[0]!.history.length).toBe(w.civs[0]!.history.length);
+    expect(w2.agents.map((a) => a.civId)).toEqual(w.agents.map((a) => a.civId));
     expect(w2.agents.map((a) => a.name)).toEqual(w.agents.map((a) => a.name));
     expect(w2.agents.map((a) => a.needs.hunger)).toEqual(w.agents.map((a) => a.needs.hunger));
     expect(w2.structures.length).toBe(w.structures.length);
@@ -156,15 +181,50 @@ describe('save and load', () => {
 });
 
 describe('survival', () => {
-  it('a tribe survives its first day and builds a campfire', () => {
+  it('every civilization survives its first day and builds a campfire', () => {
     const w = new World(1337);
-    w.spawnTribe(6);
+    w.spawnCivilizations(4, 6);
     run(w, DAY_LENGTH);
-    expect(w.living.length).toBe(6);
-    expect(w.structures.some((s) => s.kind === 'campfire' && s.complete)).toBe(true);
+    expect(w.living.length).toBeGreaterThanOrEqual(24);
+    for (const c of w.civs) {
+      expect(w.structures.some((s) => s.civId === c.id && s.kind === 'campfire' && s.complete)).toBe(true);
+      expect(c.leaderId).not.toBeNull();
+    }
     for (const a of w.agents) {
       expect(Number.isFinite(a.x) && Number.isFinite(a.z)).toBe(true);
       expect(a.stats.foodEaten).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('civilization time', () => {
+  it('runs each civilization at its own speed', () => {
+    const w = new World(1337);
+    w.spawnCivilizations(3, 5);
+    w.civs[0]!.speed = 4;
+    w.civs[1]!.speed = 0;
+    w.civs[2]!.speed = 0.25;
+    const t0 = w.civs.map((c) => c.clock);
+    run(w, HOUR * 2);
+    const dt = w.civs.map((c, i) => c.clock - t0[i]!);
+    expect(dt[0]).toBeCloseTo(HOUR * 8, 0);
+    expect(dt[1]).toBe(0);
+    expect(dt[2]).toBeCloseTo(HOUR * 0.5, 0);
+    // Frozen people don't move at all.
+    const frozen = w.civs[1]!.members.map((a) => [a.x, a.z]);
+    run(w, HOUR * 0.5);
+    expect(w.civs[1]!.members.map((a) => [a.x, a.z])).toEqual(frozen);
+    for (const a of w.agents) expect(Number.isFinite(a.x) && Number.isFinite(a.needs.hunger)).toBe(true);
+  });
+
+  it('a civilization back at 1x drifts back into step with the sun', () => {
+    const w = new World(1337);
+    w.spawnCivilizations(1, 3);
+    const civ = w.civs[0]!;
+    civ.clock += HOUR * 5; // five hours ahead after a burst of speed
+    expect(effectiveSpeed(civ, w.worldTime)).toBeLessThan(1);
+    run(w, HOUR * 12);
+    const phase = (((civ.clock - w.worldTime) % DAY_LENGTH) + DAY_LENGTH) % DAY_LENGTH;
+    expect(Math.min(phase, DAY_LENGTH - phase)).toBeLessThan(HOUR * 0.1);
   });
 });

@@ -1,13 +1,18 @@
 import { ADULT_AGE, Agent, randomAppearance } from '../agents/Agent';
-import { makeName } from '../agents/names';
 import { TRAITS, TRAIT_IDS, type TraitId } from '../agents/traits';
 import { DAY_LENGTH, HOUR } from '../world/config';
 import { BLUEPRINTS } from './blueprints';
-import { adultResidents, tribeFood } from './settlement';
-import type { Structure } from './types';
+import { adultResidents, isHome, settlementFood } from './settlement';
+import { HOMES, type Structure } from './types';
 import type { World } from './World';
+import type { Civilization } from '../civ/Civilization';
+import { CULTURES, cultureName } from '../civ/cultures';
+import { randomPersona } from '../civ/persona';
+import { civHistory } from '../civ/civSystem';
 
-const MAX_POPULATION = 32;
+/** Population caps keep the simulation affordable. */
+export const MAX_CIV_POPULATION = 40;
+export const MAX_WORLD_POPULATION = 170;
 
 /**
  * Families: couples who share a hut and like each other may have a child when the tribe
@@ -15,21 +20,25 @@ const MAX_POPULATION = 32;
  * the slow engine that keeps the settlement growing.
  */
 export class Families {
-  private acc = 0;
-  private readonly lastBirth = new Map<number, number>();
+  private readonly acc = new Map<number, number>();
+  readonly lastBirth = new Map<number, number>();
 
-  update(w: World, dt: number): void {
-    this.acc += dt;
-    if (this.acc < HOUR / 2) return;
-    const step = this.acc;
-    this.acc = 0;
-    this.age(w, step);
+  /** Runs inside a civilization's time context. */
+  update(w: World, dt: number, civ: Civilization): void {
+    const acc = (this.acc.get(civ.id) ?? 0) + dt;
+    if (acc < HOUR / 2) {
+      this.acc.set(civ.id, acc);
+      return;
+    }
+    this.acc.set(civ.id, 0);
+    this.age(w, acc, civ);
     const h = w.hour;
-    if (h >= 21 && h < 21.5) for (const hut of w.structures) if (hut.kind === 'hut' && hut.complete) this.tryBirth(w, hut);
+    if (h >= 21 && h < 21.5) for (const hut of w.structures) if (hut.civId === civ.id && isHome(hut) && hut.complete) this.tryBirth(w, hut, civ);
+    civ.stats.peak = Math.max(civ.stats.peak, civ.population);
   }
 
-  private age(w: World, dt: number): void {
-    for (const a of w.agents) {
+  private age(w: World, dt: number, civ: Civilization): void {
+    for (const a of civ.members) {
       if (!a.alive) continue;
       const wasChild = a.isChild;
       a.age += (dt / DAY_LENGTH) * (a.isChild ? 3 : 1 / 12);
@@ -38,40 +47,46 @@ export class Families {
   }
 
   private growUp(w: World, a: Agent): void {
-    a.addLog(w.time, 'event', 'Grew up! Ready to work alongside the others.');
-    w.log(`${a.name} has grown up and joins the work of the tribe.`, 'star', 2, a, a.id);
+    a.addLog(w.now(a), 'event', 'Grew up! Ready to work alongside the others.');
+    w.log(`${a.name} of ${w.civOf(a)?.name ?? 'the tribe'} has grown up.`, 'star', 1, a, a.id);
     const home = w.structure(a.homeId);
-    if (home && adultResidents(w, home) > BLUEPRINTS.hut.capacity) {
+    if (home && adultResidents(w, home) > BLUEPRINTS[home.kind].capacity) {
       home.residents = home.residents.filter((id) => id !== a.id);
       a.homeId = null;
-      a.addLog(w.time, 'event', "The family hut is getting crowded — I'll need a place of my own.");
+      a.addLog(w.now(a), 'event', "The family home is getting crowded. I'll need a place of my own.");
     }
   }
 
-  private tryBirth(w: World, hut: Structure): void {
+  private tryBirth(w: World, hut: Structure, civ: Civilization): void {
     const adults = hut.residents.map((id) => w.agent(id)).filter((x): x is Agent => !!x && x.alive && !x.isChild);
     if (adults.length < 2) return;
     const [a, b] = adults as [Agent, Agent];
-    if (w.living.length >= MAX_POPULATION) return;
+    if (civ.population >= MAX_CIV_POPULATION) return;
+    let worldPop = 0;
+    for (const c of w.civs) worldPop += c.population;
+    if (worldPop >= MAX_WORLD_POPULATION) return;
     const last = this.lastBirth.get(hut.id) ?? -Infinity;
     if (w.time - last < DAY_LENGTH * 1.6) return;
-    const kids = w.living.filter((k) => k.isChild && k.homeId === hut.id).length;
-    if (kids >= 2) return;
+    const kids = civ.members.filter((k) => k.alive && k.isChild && k.homeId === hut.id).length;
+    if (kids >= (hut.kind === 'house' ? 3 : 2)) return;
     if (a.affinity(b.id) < 0.55 || b.affinity(a.id) < 0.55) return;
     const fed = a.needs.hunger > 0.45 && b.needs.hunger > 0.45 && a.needs.health > 0.6 && b.needs.health > 0.6;
-    const stocked = tribeFood(w) >= w.living.length * 1.5;
+    const settlers = w.settlers(hut.settlementId).length;
+    const stocked = settlementFood(w, hut.settlementId) >= settlers * 1.5;
     if (!fed && !stocked) return;
-    if (!w.rng.chance(0.4)) return;
+    const blessed = civ.hasEffect('blessed', w.worldTime) ? 0.15 : 0;
+    const cursed = civ.hasEffect('cursed', w.worldTime) ? 0.2 : 0;
+    if (!w.rng.chance(0.4 + blessed - cursed)) return;
     this.lastBirth.set(hut.id, w.time);
     this.birth(w, hut, a, b);
   }
 
   birth(w: World, hut: Structure, a: Agent, b: Agent): Agent {
     const rng = w.rng;
-    const taken = new Set(w.agents.map((x) => x.name));
-    const r = BLUEPRINTS.hut.blockRadius + 0.7;
+    const civ = w.civOf(a);
+    const r = BLUEPRINTS[hut.kind].blockRadius + 0.7;
     const p = w.nav.nearestWalkable(hut.x + Math.sin(hut.rot) * r, hut.z + Math.cos(hut.rot) * r, 6) ?? { x: hut.x, z: hut.z };
-    const look = randomAppearance(rng);
+    const look = randomAppearance(rng, civ?.culture);
     look.skin = rng.chance(0.5) ? a.look.skin : b.look.skin;
     look.hair = rng.chance(0.5) ? a.look.hair : b.look.hair;
     const traits: TraitId[] = [];
@@ -80,7 +95,10 @@ export class Families {
       if (traits.some((o) => TRAITS[o].conflicts?.includes(t))) continue;
       traits.push(t);
     }
-    const child = new Agent(w.nextId(), makeName(rng, taken), p.x, p.z, traits, look, 0.5);
+    const child = new Agent(w.nextId(), cultureName(rng, CULTURES[civ?.culture ?? 'vale'], w.takenNames()), p.x, p.z, traits, look, 0.5);
+    child.civId = a.civId;
+    child.settlementId = hut.settlementId >= 0 ? hut.settlementId : a.settlementId;
+    child.persona = rng.chance(0.5) ? randomPersona(rng, [...a.persona, ...b.persona]) : randomPersona(rng);
     child.parents = [a.id, b.id];
     child.bornAt = w.time;
     child.homeId = hut.id;
@@ -91,7 +109,7 @@ export class Families {
     child.relations.set(b.id, 0.95);
     a.relations.set(child.id, 0.95);
     b.relations.set(child.id, 0.95);
-    for (const k of w.agents) {
+    for (const k of civ?.members ?? []) {
       if (k === child || k === a || k === b || !k.alive) continue;
       child.relations.set(k.id, 0.4);
     }
@@ -101,15 +119,18 @@ export class Families {
     hut.residents.push(child.id);
     w.addAgent(child);
     w.stats.births++;
+    if (civ) civ.stats.births++;
     for (const parent of [a, b]) {
       parent.needs.social = Math.min(1, parent.needs.social + 0.3);
-      parent.addLog(w.time, 'event', `Our child ${child.name} was born!`);
-      parent.emote = { icon: 'heart', until: w.time + 6 };
+      parent.addLog(w.now(parent), 'event', `Our child ${child.name} was born!`);
+      parent.emote = { icon: 'heart', until: w.now(parent) + 6 };
     }
-    child.addLog(w.time, 'event', `Born to ${a.name} and ${b.name}.`);
+    child.addLog(w.now(child), 'event', `Born to ${a.name} and ${b.name}.`);
+    if (civ && civ.stats.births <= 3) civHistory(w, civ, `The first children were born: ${child.name}, to ${a.name} and ${b.name}.`, 'growth', civ.stats.births === 1 ? 2 : 1);
     w.log(`A baby, ${child.name}, was born to ${a.name} and ${b.name}!`, 'heart', 3, child, child.id);
     w.events.emit('fx', { kind: 'hearts', x: p.x, z: p.z, y: 1.4, count: 12 });
     void ADULT_AGE;
+    void HOMES;
     return child;
   }
 }

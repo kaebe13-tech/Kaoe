@@ -1,6 +1,6 @@
 import type { Game, Speed, Tool } from '../game/Game';
 import type { FeedEvent } from '../sim/events';
-import { campfire, storages, tribeFood, tribeStored } from '../sim/settlement';
+import { civFood, civStored } from '../sim/settlement';
 import { POWERS } from '../powers/GodPowers';
 import { h, iconEl, escapeHtml, hex, setHtml, setText } from './dom';
 import { ICON_COLORS, icon } from './icons';
@@ -413,9 +413,9 @@ export class UI {
 
   private renderTime(): void {
     const w = this.game.world;
-    setText(this.dayEl, `Day ${w.day}`);
-    setText(this.clockEl, w.clockString());
-    const night = w.hour < 6 || w.hour >= 19.5;
+    setText(this.dayEl, `Day ${w.worldDay}`);
+    setText(this.clockEl, w.clockString(w.worldTime));
+    const night = w.worldHour < 6 || w.worldHour >= 19.5;
     const ic = night ? 'moon' : 'sun';
     if (this.dialIcon.dataset.ic !== ic) {
       this.dialIcon.dataset.ic = ic;
@@ -425,17 +425,18 @@ export class UI {
     const f = this.game.controls.focus;
     this.weatherEl.classList.toggle('on', w.rainAt(f.x, f.z) > 0.15 || w.weather.anyRain > 0.5);
     const pop = w.living.length;
-    const huts = w.structures.filter((s) => s.kind === 'hut' && s.complete).length;
     const chips = [
       `<span class="chip" title="Population"><span class="icon" style="color:#f5c451">${icon('people')}</span>${pop}</span>`,
-      `<span class="chip" title="Huts built"><span class="icon" style="color:#f2c46b">${icon('home')}</span>${huts}</span>`,
+      `<span class="chip" title="Civilizations"><span class="icon" style="color:#f2c46b">${icon('home')}</span>${w.civs.filter((c) => c.population > 0).length}</span>`,
     ];
-    if (storages(w).length) {
-      chips.push(`<span class="chip" title="Food in storage"><span class="icon" style="color:#ff7b6b">${icon('food')}</span>${tribeFood(w)}</span>`);
-      chips.push(`<span class="chip" title="Wood in storage"><span class="icon" style="color:#d49a5c">${icon('wood')}</span>${tribeStored(w, 'wood')}</span>`);
+    let food = 0;
+    let wood = 0;
+    for (const c of w.civs) {
+      food += civFood(w, c);
+      wood += civStored(w, c, 'wood');
     }
-    const fire = campfire(w);
-    if (fire?.complete) chips.push(`<span class="chip" title="Campfire fuel"><span class="icon" style="color:#ff9a45">${icon('fire')}</span>${Math.round(fire.fuel * 100)}%</span>`);
+    chips.push(`<span class="chip" title="Food in storage"><span class="icon" style="color:#ff7b6b">${icon('food')}</span>${food}</span>`);
+    chips.push(`<span class="chip" title="Wood in storage"><span class="icon" style="color:#d49a5c">${icon('wood')}</span>${wood}</span>`);
     setHtml(this.statsEl, chips.join(''));
     this.pausedBadge.classList.toggle('on', this.game.speed === 0);
   }

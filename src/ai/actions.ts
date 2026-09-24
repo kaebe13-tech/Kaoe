@@ -4,7 +4,11 @@ import type { World } from '../sim/World';
 import { HOUR } from '../world/config';
 import { BLUEPRINTS } from '../sim/blueprints';
 import { deliverToSite, storeItems, takeItems, workOnSite } from '../sim/construction';
-import { chooseSite, siteClear } from '../sim/settlement';
+import { chooseSite, siteClear, storages } from '../sim/settlement';
+import { adjustOpinion, civHistory } from '../civ/civSystem';
+import { leaderMemory } from '../civ/leader';
+import { LANDMARK_INFO } from '../world/biomes';
+import { MATERIALS } from '../sim/types';
 import {
   CARRY_CAPACITY,
   FOOD_ITEMS,
@@ -94,7 +98,7 @@ export class MoveTo extends Action {
 
 /** Distance at which an agent can reach a resource. */
 export function reachOf(kind: string, blockRadius: number): number {
-  return (kind === 'tree' || kind === 'fruitTree' ? blockRadius : 0.35) + 0.95;
+  return (kind === 'tree' || kind === 'fruitTree' || kind === 'rock' || kind === 'crystal' ? blockRadius : 0.35) + 0.95;
 }
 
 /** Stand-off point next to a resource, on the side facing the agent. */
@@ -132,6 +136,8 @@ export class Harvest extends Action {
 
   get label(): string {
     if (this.item === 'wood') return `Chopping wood (${this.count}/${this.max})`;
+    if (this.item === 'stone') return `Breaking stone (${this.count}/${this.max})`;
+    if (this.item === 'crystal') return `Chipping crystal (${this.count}/${this.max})`;
     return `Picking ${ITEMS[this.item].plural} (${this.count}/${this.max})`;
   }
 
@@ -147,6 +153,7 @@ export class Harvest extends Action {
       }
       if (this.count > 0) return this.done(a);
       if (r.kind === 'tree') return this.fail(r.state === 'stump' ? 'Someone had already cut the tree down' : 'The tree could not be cut');
+      if (r.kind === 'rock' || r.kind === 'crystal') return this.fail('There was nothing left to break off');
       return this.fail(r.claims > 1 ? 'Someone got there first — nothing left to pick' : 'Nothing left to pick');
     }
     const reach = reachOf(r.kind, r.blockRadius) + 0.35;
@@ -154,23 +161,28 @@ export class Harvest extends Action {
     const item = resourceYield(r)!;
     if (inventoryWeight(a.inventory) + ITEMS[item].weight > CARRY_CAPACITY + 1e-6) return this.done(a);
     a.focus = { x: r.x, z: r.z };
-    a.setAnim(item === 'wood' ? 'chop' : 'gather');
-    const unit = item === 'wood' ? 2.6 : item === 'fruit' ? 1.3 : 0.85;
-    const pace = a.has('industrious') ? 1.15 : 1;
+    const heavy = item === 'wood' || item === 'stone' || item === 'crystal';
+    a.setAnim(item === 'wood' ? 'chop' : item === 'stone' || item === 'crystal' ? 'mine' : 'gather');
+    const unit = item === 'wood' ? 2.6 : item === 'stone' ? 3.2 : item === 'crystal' ? 3.6 : item === 'fruit' ? 1.3 : 0.85;
+    const tools = w.structures.some((s) => s.kind === 'workshop' && s.complete && s.settlementId === a.settlementId) ? 1.15 : 1;
+    const pace = (a.has('industrious') ? 1.15 : 1) * (heavy ? tools : 1) * (a.blessedUntil > w.worldTime ? 1.25 : 1);
     this.timer += dt * pace;
-    // Axe swings land three times per log; berries pop off one at a time.
-    const swings = item === 'wood' ? 3 : 1;
+    // Axe and pick swings land three times per unit; berries pop off one at a time.
+    const swings = heavy ? 3 : 1;
     const hitAt = (unit / swings) * (this.hits + 1);
     if (this.timer >= hitAt) {
       this.hits++;
-      r.lastUse = w.time;
+      r.lastUse = w.worldTime;
       w.events.emit('resourceHit', r);
       if (item === 'wood') {
         w.events.emit('sfx', { kind: 'chop', x: r.x, z: r.z });
         w.events.emit('fx', { kind: 'woodChips', x: r.x, z: r.z, y: 0.9 });
+      } else if (item === 'stone' || item === 'crystal') {
+        w.events.emit('sfx', { kind: 'mine', x: r.x, z: r.z });
+        w.events.emit('fx', { kind: item === 'crystal' ? 'crystalShards' : 'stoneChips', x: r.x, z: r.z, y: 0.6 });
       } else {
         w.events.emit('sfx', { kind: 'gather', x: r.x, z: r.z });
-        w.events.emit('fx', { kind: item === 'berries' ? 'berryPop' : 'leaves', x: r.x, z: r.z, y: item === 'fruit' ? 2.2 : 0.6 });
+        w.events.emit('fx', { kind: item === 'berries' ? 'berryPop' : 'leaves', x: r.x, z: r.z, y: item === 'fruit' ? 2.2 : 0.4 });
       }
     }
     if (this.timer >= unit) {
@@ -194,6 +206,11 @@ export class Harvest extends Action {
         w.events.emit('treeFelled', { resource: r, dirX: dx / d, dirZ: dz / d });
         w.events.emit('sfx', { kind: 'treeFall', x: r.x, z: r.z });
         a.addLog(w.time, 'event', `Felled ${withArticle(resourceLabel({ ...r, state: 'grown' }).toLowerCase())}.`);
+      }
+      if ((r.kind === 'rock' || r.kind === 'crystal') && r.amount <= 0) {
+        r.regrow = 0;
+        w.setResourceState(r, 'stump');
+        w.events.emit('fx', { kind: r.kind === 'crystal' ? 'crystalShards' : 'dust', x: r.x, z: r.z, count: 10 });
       }
       if (this.count >= this.max || r.amount <= 0) return this.done(a);
     }
@@ -222,13 +239,19 @@ export class Eat extends Action {
   }
 
   tick(a: Agent, w: World, dt: number): ActionStatus {
-    const total = (this.eaten.berries ?? 0) + (this.eaten.fruit ?? 0);
+    const total = (this.eaten.berries ?? 0) + (this.eaten.fruit ?? 0) + (this.eaten.mushrooms ?? 0);
     if (a.needs.hunger >= 0.97 || total >= this.maxItems) return this.done();
     const deficit = 1 - a.needs.hunger;
+    // Biggest item that doesn't waste much; otherwise whatever is left.
     let item: ItemType | null = null;
-    if (a.inventory.fruit > 0 && (deficit >= ITEMS.fruit.food * 0.8 || a.inventory.berries === 0)) item = 'fruit';
-    else if (a.inventory.berries > 0) item = 'berries';
-    else if (a.inventory.fruit > 0) item = 'fruit';
+    for (const k of FOOD_ITEMS) if (a.inventory[k] > 0 && deficit >= ITEMS[k].food * 0.8) {
+      item = k;
+      break;
+    }
+    if (!item) for (const k of [...FOOD_ITEMS].reverse()) if (a.inventory[k] > 0) {
+      item = k;
+      break;
+    }
     if (!item) return total > 0 ? this.done() : this.fail('Had no food to eat');
     a.setAnim('eat');
     this.timer += dt;
@@ -254,18 +277,26 @@ export class Drink extends Action {
   override interruptible = false;
   private splash = 0;
 
-  constructor(private readonly pondCenter: V2) {
+  constructor(
+    private readonly pondCenter: V2,
+    private readonly magic = false,
+  ) {
     super();
   }
 
   get label(): string {
-    return 'Drinking from the pond';
+    return this.magic ? 'Drinking from the Moonwell' : 'Drinking';
   }
 
   tick(a: Agent, w: World, dt: number): ActionStatus {
     a.focus = this.pondCenter;
     a.setAnim('drink');
     a.needs.thirst = Math.min(1, a.needs.thirst + dt * 0.24);
+    if (this.magic) {
+      // The Moonwell heals.
+      a.needs.health = Math.min(1, a.needs.health + dt * 0.03);
+      a.needs.safety = Math.min(1, a.needs.safety + dt * 0.02);
+    }
     this.splash += dt;
     if (this.splash > 1.1) {
       this.splash = 0;
@@ -277,7 +308,8 @@ export class Drink extends Action {
     }
     this.progress = a.needs.thirst;
     if (a.needs.thirst >= 0.99) {
-      this.summary = 'Drank until no longer thirsty.';
+      this.summary = this.magic ? 'Drank from the Moonwell. It tasted of starlight.' : 'Drank until no longer thirsty.';
+      if (this.magic) a.faith = Math.min(1, a.faith + 0.03);
       return 'success';
     }
     return 'running';
@@ -324,7 +356,7 @@ export class Sleep extends Action {
 
   get label(): string {
     if (this.collapse) return 'Collapsed from exhaustion';
-    return this.place === 'hut' ? 'Sleeping in the hut' : this.place === 'fire' ? 'Sleeping by the fire' : 'Sleeping on the ground';
+    return this.place === 'hut' ? 'Sleeping at home' : this.place === 'fire' ? 'Sleeping by the fire' : 'Sleeping on the ground';
   }
 
   override begin(a: Agent, w: World): void {
@@ -563,14 +595,14 @@ export class Withdraw extends Action {
   private t = 0;
   constructor(
     private readonly storageId: number,
-    private readonly item: ItemType | 'food',
+    private readonly item: ItemType | 'food' | 'gift',
     private readonly count: number,
   ) {
     super();
   }
 
   get label(): string {
-    return this.item === 'food' ? 'Taking food from storage' : `Taking ${ITEMS[this.item].plural} from storage`;
+    return this.item === 'food' ? 'Taking food from storage' : this.item === 'gift' ? 'Packing gifts' : `Taking ${ITEMS[this.item].plural} from storage`;
   }
 
   tick(a: Agent, w: World, dt: number): ActionStatus {
@@ -581,14 +613,14 @@ export class Withdraw extends Action {
     this.t += dt;
     if (this.t < 0.8) return 'running';
     let got = 0;
-    const items: ItemType[] = this.item === 'food' ? [...FOOD_ITEMS] : [this.item];
+    const items: ItemType[] = this.item === 'food' ? [...FOOD_ITEMS] : this.item === 'gift' ? ['fruit', 'mushrooms', 'berries', 'stone', 'wood', 'crystal'] : [this.item];
     for (const k of items) {
       if (got >= this.count) break;
       const room = Math.floor((CARRY_CAPACITY - inventoryWeight(a.inventory)) / ITEMS[k].weight);
       got += takeItems(w, s, a, k, Math.min(this.count - got, room));
     }
     if (got <= 0) return this.fail('The storage was empty');
-    this.summary = `Took ${got} ${this.item === 'food' ? 'food' : ITEMS[this.item].plural} from the ${BLUEPRINTS[s.kind].name.toLowerCase()}.`;
+    this.summary = `Took ${got} ${this.item === 'food' ? 'food' : this.item === 'gift' ? 'gifts' : ITEMS[this.item].plural} from the ${BLUEPRINTS[s.kind].name.toLowerCase()}.`;
     return 'success';
   }
 
@@ -658,6 +690,7 @@ export class PlaceSite extends Action {
     private readonly kind: StructureKind,
     private spot: { x: number; z: number; rot: number },
     private readonly reason: string,
+    private readonly sid: number,
   ) {
     super();
   }
@@ -667,16 +700,18 @@ export class PlaceSite extends Action {
   }
 
   tick(a: Agent, w: World): ActionStatus {
-    if (w.structures.some((s) => s.kind === this.kind && !s.complete)) return this.fail('Someone else already started one');
+    if (w.structures.some((s) => s.kind === this.kind && !s.complete && s.settlementId === this.sid)) return this.fail('Someone else already started one');
     if (!siteClear(w, this.spot.x, this.spot.z, BLUEPRINTS[this.kind].radius)) {
-      const alt = chooseSite(w, this.kind, a);
+      const alt = chooseSite(w, this.kind, this.sid, a);
       if (!alt) return this.fail('There was no clear ground');
       this.spot = alt;
     }
-    const s = w.createStructure(this.kind, this.spot.x, this.spot.z, this.spot.rot, a.id);
+    const s = w.createStructure(this.kind, this.spot.x, this.spot.z, this.spot.rot, a.id, a.civId, this.sid);
     s.builders.push(a.id);
     const name = BLUEPRINTS[this.kind].name.toLowerCase();
-    w.log(`${a.name} started building a ${name}. ${this.reason}.`, 'build', 2, s, a.id);
+    const civ = w.civOf(a);
+    const big = this.kind === 'campfire' || this.kind === 'hall' || this.kind === 'monument' || this.kind === 'workshop';
+    w.log(`${a.name}${civ ? ` of ${civ.name}` : ''} started building a ${name}. ${this.reason}.`, 'build', big ? 2 : 1, s, a.id);
     w.events.emit('fx', { kind: 'dust', x: s.x, z: s.z, count: 10 });
     this.summary = `Marked out a spot for a ${name}.`;
     return 'success';
@@ -845,7 +880,7 @@ export class Search extends Action {
 
 /** Start a conversation: the partner joins if they're free enough. */
 export function invite(w: World, from: Agent, to: Agent, duration: number): boolean {
-  if (!to.awake || to.inside !== null) return false;
+  if (!to.awake || to.inside !== null || to.civId !== from.civId) return false;
   const act = to.brain.active;
   if (act && (act.urgent || act.score > 0.52 || act.goal === 'chat' || act.goal === 'flee' || act.goal === 'help' || act.goal === 'pray')) return false;
   const step = act?.plan[act.step];
@@ -955,17 +990,17 @@ function finishConversation(w: World, a: Agent, b: Agent): void {
 }
 
 export function shareKnowledge(w: World, from: Agent, to: Agent): string | null {
-  const offers = [...from.memory.resources.values()].filter((m) => m.amount > 0 && !to.memory.resources.has(m.id) && (m.kind === 'berryBush' || m.kind === 'fruitTree'));
+  const offers = [...from.memory.resources.values()].filter((m) => m.amount > 0 && !to.memory.resources.has(m.id) && m.kind !== 'tree');
   offers.sort((x, y) => (y.kind === 'fruitTree' ? 2 : 1) * y.amount - (x.kind === 'fruitTree' ? 2 : 1) * x.amount);
   let text: string | null = null;
   for (const m of offers.slice(0, 2)) {
     to.memory.rememberResource({ id: m.id, kind: m.kind, x: m.x, z: m.z, amount: m.amount, seenAt: m.seenAt, source: 'told' });
-    text ??= `${m.kind === 'fruitTree' ? 'a fruit tree' : 'berries'} ${describePlace(w, m.x, m.z)}`;
+    text ??= `${m.kind === 'fruitTree' ? 'a fruit tree' : m.kind === 'mushroom' ? 'mushrooms' : m.kind === 'rock' ? 'good stone' : m.kind === 'crystal' ? 'crystal' : 'berries'} ${describePlace(w, m.x, m.z, false, to)}`;
   }
   for (const [id, wm] of from.memory.water) {
     if (!to.memory.water.has(id)) {
       to.memory.water.set(id, { ...wm });
-      text ??= `fresh water ${describePlace(w, wm.x, wm.z)}`;
+      text ??= `fresh water ${describePlace(w, wm.x, wm.z, true, to)}`;
     }
   }
   return text;
@@ -1206,6 +1241,140 @@ export class Play extends Action {
 
   override finish(a: Agent, w: World): void {
     stopNav(a, w);
+    a.setAnim('idle');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Civilization errands
+// ---------------------------------------------------------------------------
+
+/** Hand gifts to another people and speak for your leader. */
+export class Envoy extends Action {
+  override interruptible = false;
+  private t = 0;
+  constructor(
+    private readonly civId: number,
+    private readonly peace: boolean,
+  ) {
+    super();
+  }
+
+  get label(): string {
+    return this.peace ? 'Speaking of peace' : 'Offering gifts';
+  }
+
+  tick(a: Agent, w: World, dt: number): ActionStatus {
+    const mine = w.civOf(a);
+    const other = w.civs[this.civId];
+    if (!mine || !other) return this.fail('They were gone');
+    a.setAnim(this.t < 2 ? 'wave' : 'talk');
+    this.t += dt;
+    if (this.t < 4) return 'running';
+    let given = 0;
+    const store = other.capital ? storages(w, other.capital.id)[0] : undefined;
+    for (const k of [...FOOD_ITEMS, ...MATERIALS]) {
+      const n = a.inventory[k];
+      if (n <= 0) continue;
+      a.inventory[k] -= n;
+      if (store) store.stored[k] += n;
+      given += n;
+    }
+    const warm = (this.peace ? 0.12 : 0.08) + Math.min(0.1, given * 0.012);
+    adjustOpinion(w, other, mine, warm, `${a.name} of ${mine.name} came in peace${given ? ` bearing ${given} gifts` : ''}.`);
+    adjustOpinion(w, mine, other, warm * 0.5, `${other.name} received our envoy ${a.name}.`);
+    // They trade what they know of the land.
+    for (let i = 0; i < mine.knowledge.map.length; i++) if (other.knowledge.map[i]) a.memory.explored[i] = Math.max(a.memory.explored[i]!, 1e-3);
+    for (const id of other.knowledge.landmarks) if (!mine.knowledge.landmarks.has(id) && !a.news.some((n) => n.kind === 'landmark' && n.id === id)) a.news.push({ kind: 'landmark', id });
+    const text = `${a.name} of ${mine.name} visited ${other.name} ${this.peace ? 'to make peace' : 'with gifts'}.`;
+    w.log(text, 'social', 2, a, a.id);
+    civHistory(w, mine, `${a.name} went to ${other.name} as our envoy${given ? ` with ${given} gifts` : ''}.`, 'relation', 2);
+    civHistory(w, other, `${a.name}, an envoy of ${mine.name}, came ${this.peace ? 'seeking peace' : 'bearing gifts'}.`, 'relation', 2);
+    leaderMemory(other, `${mine.name} sent ${a.name} to us ${this.peace ? 'to make peace' : 'with gifts'}.`, 2);
+    w.events.emit('fx', { kind: 'hearts', x: a.x, z: a.z, y: 1.8, count: 6 });
+    this.summary = `Delivered ${given} gifts to ${other.name}.`;
+    return 'success';
+  }
+
+  override finish(a: Agent): void {
+    a.setAnim('idle');
+  }
+}
+
+/** Kneel at a wonder and pray. */
+export class Worship extends Action {
+  private t = 0;
+  constructor(
+    private readonly landmarkId: number,
+    private readonly duration: number,
+  ) {
+    super();
+  }
+
+  get label(): string {
+    return 'Worshipping';
+  }
+
+  tick(a: Agent, w: World, dt: number): ActionStatus {
+    const l = w.terrain.landmarks.find((x) => x.id === this.landmarkId);
+    if (!l) return this.fail('It was gone');
+    a.focus = { x: l.x, z: l.z };
+    a.setAnim('pray');
+    this.t += dt;
+    const hr = dt / HOUR;
+    a.faith = Math.min(1, a.faith + hr * 0.25);
+    a.needs.safety = Math.min(1, a.needs.safety + hr * 0.8);
+    if (l.kind === 'spring') a.needs.health = Math.min(1, a.needs.health + dt * 0.01);
+    this.progress = clamp01(this.t / this.duration);
+    if (this.t >= this.duration) {
+      const civ = w.civOf(a);
+      if (civ) civ.rep.awe = Math.min(1, civ.rep.awe + 0.01);
+      w.events.emit('fx', { kind: 'sparkle', x: a.x, z: a.z, y: 1.6, count: 6 });
+      this.summary = `Prayed at ${l.name}. ${LANDMARK_INFO[l.kind].effect}`;
+      return 'success';
+    }
+    return 'running';
+  }
+
+  override finish(a: Agent): void {
+    if (a.anim === 'pray') a.setAnim('idle');
+  }
+}
+
+/** The leader stands by the evening fire and speaks to the people. */
+export class Address extends Action {
+  private t = 0;
+  constructor(
+    private readonly fireId: number,
+    private readonly duration: number,
+  ) {
+    super();
+  }
+
+  get label(): string {
+    return 'Speaking to the people';
+  }
+
+  tick(a: Agent, w: World, dt: number): ActionStatus {
+    const fire = w.structure(this.fireId);
+    if (!fire) return this.fail('The fire is gone');
+    a.focus = { x: fire.x, z: fire.z };
+    a.setAnim(Math.floor(this.t / 3) % 3 === 2 ? 'wave' : 'talk');
+    this.t += dt;
+    // Listeners by the fire feel heard.
+    if (Math.floor(this.t) !== Math.floor(this.t - dt)) {
+      w.agentHash.query(fire.x, fire.z, 5, (o) => {
+        if (o !== a && o.alive && o.civId === a.civId && (o.anim === 'sit' || o.anim === 'sitTalk')) {
+          o.needs.safety = Math.min(1, o.needs.safety + 0.01);
+          o.bond(a.id, 0.004);
+        }
+      });
+    }
+    this.progress = clamp01(this.t / this.duration);
+    return this.t >= this.duration || !fire.lit ? 'success' : 'running';
+  }
+
+  override finish(a: Agent): void {
     a.setAnim('idle');
   }
 }

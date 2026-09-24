@@ -4,6 +4,8 @@ import { campCenter } from './settlement';
 import type { World } from './World';
 import { abortActive } from '../ai/brainCore';
 import { stopNav } from '../ai/locomotion';
+import { civHistory } from '../civ/civSystem';
+import { leaderMemory } from '../civ/leader';
 
 const WORK_ANIMS = new Set(['chop', 'build', 'gather']);
 
@@ -33,9 +35,12 @@ export function updateNeeds(a: Agent, w: World, dt: number): void {
   // Safety drifts back toward a baseline that depends on circumstances.
   let baseline = 1;
   if (w.isNight && a.inside === null) {
-    const far = Math.hypot(a.x - campCenter(w).x, a.z - campCenter(w).z) > 25;
-    if (far) baseline = a.has('timid') ? 0.45 : 0.75;
+    const c = campCenter(w, a.settlementId);
+    const far = Math.hypot(a.x - c.x, a.z - c.z) > 25;
+    // Explorers far from home accept the dark; everyone else feels exposed.
+    if (far) baseline = a.brain.active?.key.startsWith('expedition') ? 0.8 : a.has('timid') ? 0.45 : 0.75;
   }
+  if (a.protectedUntil > w.worldTime) baseline = 1;
   const rain = a.inside === null ? w.rainAt(a.x, a.z) : 0;
   if (rain > 0.3) baseline = Math.min(baseline, 0.85);
   n.safety += (baseline - n.safety) * Math.min(1, hr * (n.safety < baseline ? 0.5 : 0.8));
@@ -50,15 +55,21 @@ export function updateNeeds(a: Agent, w: World, dt: number): void {
     n.health -= hr * 0.08;
     cause = 'thirst';
   }
-  if (n.hunger > 0.3 && n.thirst > 0.3) n.health += hr * 0.025 * (asleep ? 3 : a.anim === 'sit' ? 2.5 : 1);
+  if (n.hunger > 0.3 && n.thirst > 0.3) n.health += hr * 0.025 * (asleep ? 3 : a.anim === 'sit' ? 2.5 : 1) * (a.blessedUntil > w.worldTime ? 2 : 1);
+  if (a.cursedUntil > w.worldTime) {
+    n.health -= hr * 0.02;
+    n.safety = Math.min(n.safety, 0.6);
+  }
 
   // Standing in a fire.
-  w.resourceHash.query(a.x, a.z, 2.2, (r) => {
-    if (r.burning > 0) {
-      n.health -= dt * 0.015;
-      cause = 'burns';
-    }
-  });
+  if (a.protectedUntil <= w.worldTime) {
+    w.resourceHash.query(a.x, a.z, 2.2, (r) => {
+      if (r.burning > 0) {
+        n.health -= dt * 0.015;
+        cause = 'burns';
+      }
+    });
+  }
 
   n.hunger = clamp(n.hunger);
   n.thirst = clamp(n.thirst);
@@ -68,7 +79,7 @@ export function updateNeeds(a: Agent, w: World, dt: number): void {
   n.health = clamp(n.health);
 
   if (a.knocked > 0) a.knocked = Math.max(0, a.knocked - dt);
-  if (a.emote && a.emote.until < w.time) a.emote = null;
+  if (a.emote && (a.emote.until < w.time || a.emote.until > w.time + 60)) a.emote = null;
   // Faith fades slowly without new signs from above.
   if (a.faith > 0) a.faith = Math.max(0, a.faith - (dt / (HOUR * 24)) * 0.04);
 
@@ -91,7 +102,7 @@ function warn(a: Agent, w: World): void {
     }
     if (warned.has(k)) return;
     warned.set(k, w.time);
-    w.log(text, 'warning', 2, a, a.id);
+    w.log(text, 'warning', 1, a, a.id);
   };
   check('hunger', a.needs.hunger < 0.08, `${a.name} is starving!`);
   check('thirst', a.needs.thirst < 0.08, `${a.name} is dying of thirst!`);
@@ -104,31 +115,41 @@ export function kill(a: Agent, w: World, cause: string): void {
   stopNav(a, w);
   a.alive = false;
   a.deathCause = cause;
-  a.diedAt = w.time;
+  a.diedAt = w.now(a);
   a.inside = null;
   a.setAnim('dead');
   w.stats.deaths++;
+  const civ = w.civOf(a);
+  if (civ) civ.stats.deaths++;
   const how: Record<string, string> = {
     starvation: 'starved to death',
     thirst: 'died of thirst',
     burns: 'died in the fire',
     lightning: 'was killed by lightning',
     exhaustion: 'died of exhaustion',
+    meteor: 'was killed by a falling star',
+    quake: 'was crushed when the earth shook',
+    curse: 'withered under a curse',
   };
-  w.log(`${a.name} ${how[cause] ?? 'has died'}.`, 'death', 3, a, a.id);
+  const wasLeader = civ?.leaderId === a.id;
+  w.log(`${a.name}${civ ? ` of ${civ.name}` : ''}${wasLeader ? ', their leader,' : ''} ${how[cause] ?? 'has died'}.`, 'death', 3, a, a.id);
   w.events.emit('sfx', { kind: 'death', x: a.x, z: a.z });
   w.events.emit('agentDied', a);
+  if (civ) {
+    civHistory(w, civ, `${a.name}${wasLeader ? ', their leader,' : ''} ${how[cause] ?? 'died'}.`, 'death', wasLeader ? 3 : 2);
+    leaderMemory(civ, `${a.name} ${how[cause] ?? 'died'}.`, wasLeader ? 3 : 2);
+  }
   // Everyone who knew them grieves, the closest friends the most.
-  for (const o of w.agents) {
+  for (const o of civ?.members ?? w.agents) {
     if (o === a || !o.alive) continue;
     const aff = o.affinity(a.id);
     o.needs.safety = Math.max(0, o.needs.safety - 0.2 - aff * 0.3);
     o.needs.social = Math.max(0, o.needs.social - aff * 0.3);
-    o.addLog(w.time, 'event', `Mourning ${a.name}.`);
-    if (aff > 0.4) o.memory.addDanger({ x: a.x, z: a.z, at: w.time, kind: 'death' });
+    o.addLog(w.now(o), 'event', `Mourning ${a.name}.`);
+    if (aff > 0.4) o.memory.addDanger({ x: a.x, z: a.z, at: w.now(o), kind: 'death' });
     if (o.homeId !== null) {
       const hut = w.structure(o.homeId);
-      if (hut && hut.id === a.homeId) o.addLog(w.time, 'event', `The hut feels empty without ${a.name}.`);
+      if (hut && hut.id === a.homeId) o.addLog(w.now(o), 'event', `Home feels empty without ${a.name}.`);
     }
   }
   const hut = w.structure(a.homeId);

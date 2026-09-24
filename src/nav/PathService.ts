@@ -47,18 +47,22 @@ export class PathService {
     return this.queue.length;
   }
 
-  step(): void {
+  /** Solve up to `budget` queued requests, stopping early if this call runs long. */
+  step(budget = this.perStep, maxMs = 6): void {
     let solved = 0;
-    while (this.queue.length && solved < this.perStep) {
+    const start = performance.now();
+    while (this.queue.length && solved < budget) {
       const req = this.queue.shift()!;
       if (req.cancelled) continue;
       this.byOwner.delete(req.owner);
       const t0 = performance.now();
       const path = this.finder.find(req.from, req.to);
-      this.msTotal += performance.now() - t0;
+      const t1 = performance.now();
+      this.msTotal += t1 - t0;
       this.solvedTotal++;
       solved++;
       req.done(path);
+      if (t1 - start > maxMs) break;
     }
   }
 }

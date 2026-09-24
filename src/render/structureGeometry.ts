@@ -8,6 +8,8 @@ export interface Piece {
   at: number;
   /** Optional: the piece glows at night (windows). */
   glow?: boolean;
+  /** Optional: the piece disappears once construction passes this point (scaffolding). */
+  until?: number;
 }
 
 const WOOD = 0x7a5232;

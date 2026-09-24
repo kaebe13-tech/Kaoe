@@ -3,6 +3,9 @@ import { clamp, damp, dampAngle } from '../core/math';
 import type { Terrain } from '../world/Terrain';
 import { WORLD_HALF } from '../world/config';
 
+/** Furthest zoom: the whole world fits on screen. */
+export const MAX_DIST = 760;
+
 /**
  * RTS / god-game camera: orbits a focus point on the ground. WASD pans relative to the view,
  * right-drag (or Alt+drag) rotates, left-drag grabs the ground, the wheel zooms toward the cursor.
@@ -143,7 +146,7 @@ export class CameraController {
     const delta = clamp(e.deltaY, -300, 300);
     const factor = Math.pow(1.0018, delta);
     const before = this.distance;
-    this.distance = clamp(this.distance * factor, 5, 240);
+    this.distance = clamp(this.distance * factor, 4, MAX_DIST);
     // Zoom toward the point under the cursor (only when zooming in).
     if (this.distance < before) {
       const p = this.groundPointAt(e.clientX, e.clientY, this.target.y);
@@ -183,7 +186,7 @@ export class CameraController {
     if (this.autoRotate) this.yaw += this.autoRotate * dt;
     if (this.enabled && !this.isTyping()) {
       const fast = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
-      const speed = (fast ? 2.8 : 1) * (12 + this.distance * 0.9);
+      const speed = (fast ? 2.8 : 1) * (12 + this.distance * 0.95);
       let fx = 0;
       let fz = 0;
       if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) fz += 1;
@@ -206,8 +209,8 @@ export class CameraController {
       if (this.keys.has('KeyE')) this.yaw -= rot;
       if (this.keys.has('KeyZ')) this.pitch = clamp(this.pitch + rot * 0.6, 0.22, 1.45);
       if (this.keys.has('KeyX')) this.pitch = clamp(this.pitch - rot * 0.6, 0.22, 1.45);
-      if (this.keys.has('Equal') || this.keys.has('NumpadAdd')) this.distance = clamp(this.distance * (1 - dt * 1.5), 5, 240);
-      if (this.keys.has('Minus') || this.keys.has('NumpadSubtract')) this.distance = clamp(this.distance * (1 + dt * 1.5), 5, 240);
+      if (this.keys.has('Equal') || this.keys.has('NumpadAdd')) this.distance = clamp(this.distance * (1 - dt * 1.5), 4, MAX_DIST);
+      if (this.keys.has('Minus') || this.keys.has('NumpadSubtract')) this.distance = clamp(this.distance * (1 + dt * 1.5), 4, MAX_DIST);
     }
     if (this.follow) {
       const p = this.follow();

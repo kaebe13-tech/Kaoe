@@ -11,24 +11,37 @@ export function compass(fromX: number, fromZ: number, toX: number, toZ: number):
   return DIRS[i]!;
 }
 
-/** A short, human description of where something is, relative to camp and landmarks. */
-export function describePlace(w: World, x: number, z: number, skipPond = false): string {
-  for (const p of skipPond ? [] : w.water) {
-    if (Math.hypot(p.x - x, p.z - z) < p.radius + 6) {
-      const c = campCenter(w);
-      const near = Math.hypot(p.x - c.x, p.z - c.z) < 25;
-      return near ? 'by the camp pond' : `by the ${compass(c.x, c.z, p.x, p.z)} pond`;
+/**
+ * A short, human description of where something is: relative to the speaker's home when close,
+ * by landmark, river or lake when there is one, otherwise by region.
+ */
+export function describePlace(w: World, x: number, z: number, skipWater = false, ref?: { settlementId: number } | null): string {
+  const home = ref && ref.settlementId >= 0 ? campCenter(w, ref.settlementId) : null;
+  const settlement = ref ? w.settlement(ref.settlementId) : undefined;
+  const d = home ? Math.hypot(x - home.x, z - home.z) : Infinity;
+  if (d < 12) return 'right by camp';
+  for (const l of w.terrain.landmarks) if (Math.hypot(l.x - x, l.z - z) < (l.kind === 'volcano' ? 45 : 18)) return `near ${l.name}`;
+  if (!skipWater) {
+    for (const p of w.water) {
+      if (Math.hypot(p.x - x, p.z - z) < p.radius + 6) {
+        if (p.kind === 'river') return d < 40 ? `by ${p.name}, near camp` : `by ${p.name}`;
+        if (p.kind === 'spring') return 'at the Moonwell';
+        return d < 30 ? 'by the lake near camp' : home ? `by the ${compass(home.x, home.z, p.x, p.z)} lake` : 'by a lake';
+      }
     }
   }
-  const c = campCenter(w);
-  const d = Math.hypot(x - c.x, z - c.z);
-  if (d < 12) return 'right by camp';
-  const dir = compass(c.x, c.z, x, z);
+  const region = w.terrain.regionAt(x, z);
   const h = w.terrain.heightAt(x, z);
-  if (Math.hypot(x - w.mountain.x, z - w.mountain.z) < 25 && h > 7) return `up on the mountain, ${dir} of camp`;
-  if (h < 1.6) return `on the ${dir} beach`;
-  if (d < 30) return `a short walk ${dir} of camp`;
-  return `far ${dir} of camp`;
+  if (home) {
+    const dir = compass(home.x, home.z, x, z);
+    const where = settlement?.name ?? 'camp';
+    if (h > 18) return `up in the hills ${dir} of ${where}`;
+    if (h < 1.6) return `on the ${dir} shore`;
+    if (d < 35) return `a short walk ${dir} of ${where}`;
+    if (d < 90) return `${dir} of ${where}`;
+    return region ? `far ${dir}, in ${region.name}` : `far ${dir} of ${where}`;
+  }
+  return region ? `in ${region.name}` : 'somewhere in the wilds';
 }
 
 export function resourceName(r: ResourceNode): string {

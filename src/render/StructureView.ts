@@ -1,5 +1,6 @@
 import {
   AdditiveBlending,
+  BufferGeometry,
   Color,
   ConeGeometry,
   Group,
@@ -8,8 +9,6 @@ import {
   Mesh,
   MeshBasicMaterial,
   MeshLambertMaterial,
-  Object3D,
-  PointLight,
   Quaternion,
   SphereGeometry,
   Vector3,
@@ -18,21 +17,27 @@ import { clamp01, smoothstep } from '../core/math';
 import type { Terrain } from '../world/Terrain';
 import { BLUEPRINTS } from '../sim/blueprints';
 import type { Structure } from '../sim/types';
-import { campfirePieces, gardenPieces, gravePieces, hutPieces, logPileGeometry, shrinePieces, stakeRing, storagePieces, type Piece } from './structureGeometry';
-import { prep } from './geometry';
+import { logPileGeometry, stakeRing, type Piece } from './structureGeometry';
+import { buildingPieces, styleFor } from './architecture';
+import { merge, prep } from './geometry';
 import { applySeeThrough } from './seeThrough';
+import type { CultureId } from '../civ/cultures';
+import type { LightPool, LightSource } from './LightPool';
 
 interface Entry {
   s: Structure;
   root: Group;
-  pieces: Array<{ mesh: Mesh; at: number; glow: boolean }>;
+  pieces: Piece[];
+  body: Mesh;
+  glowMesh: Mesh | null;
+  glowMat: MeshBasicMaterial | null;
+  /** Key of the visible piece set currently merged into `body`. */
+  shownKey: string;
   stakes: Mesh | null;
   pile: InstancedMesh;
   flames: Mesh[];
-  light: PointLight | null;
-  glowMat: MeshBasicMaterial | null;
+  light: LightSource | null;
   basket: Mesh | null;
-  shown: number[];
 }
 
 const ZERO = new Matrix4().makeScale(0, 0, 0);
@@ -40,8 +45,13 @@ const _m = new Matrix4();
 const _q = new Quaternion();
 const _p = new Vector3();
 const _s = new Vector3();
+const EMPTY = new BufferGeometry();
 
-/** Buildings with visible, piece-by-piece construction progress. */
+/**
+ * Buildings with visible, stage-by-stage construction. Each building's visible pieces are merged
+ * into a single mesh (rebuilt only when a stage appears), so a large world of villages costs one
+ * draw call per building.
+ */
 export class StructureView {
   readonly group = new Group();
   private readonly entries = new Map<number, Entry>();
@@ -51,7 +61,11 @@ export class StructureView {
   private readonly flameGeo = new ConeGeometry(0.22, 0.75, 7, 1, true);
   private readonly pileGeo = logPileGeometry();
 
-  constructor(private readonly terrain: Terrain) {
+  constructor(
+    private readonly terrain: Terrain,
+    private readonly lights: LightPool,
+    private readonly cultureOf: (civId: number) => CultureId | undefined,
+  ) {
     this.flameGeo.translate(0, 0.37, 0);
     applySeeThrough(this.mat, 'structure');
   }
@@ -66,44 +80,24 @@ export class StructureView {
     root.position.set(s.x, this.groundY(s), s.z);
     root.rotation.y = s.rot;
     root.name = `structure-${s.id}`;
-    let defs: Piece[];
-    switch (s.kind) {
-      case 'hut':
-        defs = hutPieces(s.id);
-        break;
-      case 'campfire':
-        defs = campfirePieces(s.id);
-        break;
-      case 'storage':
-        defs = storagePieces();
-        break;
-      case 'garden':
-        defs = gardenPieces();
-        break;
-      case 'shrine':
-        defs = shrinePieces();
-        break;
-      default:
-        defs = gravePieces();
-    }
+    const style = styleFor(this.cultureOf(s.civId));
+    const pieces = buildingPieces(s.kind, s.id, style);
+    const body = new Mesh(EMPTY, this.mat);
+    body.castShadow = true;
+    body.receiveShadow = true;
+    root.add(body);
+    let glowMesh: Mesh | null = null;
     let glowMat: MeshBasicMaterial | null = null;
-    const pieces = defs.map((d) => {
-      let mat = this.mat as MeshLambertMaterial | MeshBasicMaterial;
-      if (d.glow) {
-        glowMat = new MeshBasicMaterial({ color: 0xffc46b, transparent: true, opacity: 0 });
-        mat = glowMat;
-      }
-      const mesh = new Mesh(d.geo, mat);
-      mesh.castShadow = !d.glow;
-      mesh.receiveShadow = true;
-      mesh.visible = false;
-      root.add(mesh);
-      return { mesh, at: d.at, glow: !!d.glow };
-    });
+    const glowParts = pieces.filter((p) => p.glow).map((p) => p.geo);
+    if (glowParts.length) {
+      glowMat = new MeshBasicMaterial({ color: 0xffc46b, transparent: true, opacity: 0 });
+      glowMesh = new Mesh(merge(glowParts), glowMat);
+      glowMesh.visible = false;
+      root.add(glowMesh);
+    }
     let stakes: Mesh | null = null;
     if (s.kind !== 'grave') {
       stakes = new Mesh(stakeRing(Math.max(0.9, BLUEPRINTS[s.kind].radius - 0.5)), this.mat);
-      stakes.castShadow = false;
       root.add(stakes);
     }
     const pile = new InstancedMesh(this.pileGeo, this.mat, 12);
@@ -113,7 +107,7 @@ export class StructureView {
     root.add(pile);
 
     const flames: Mesh[] = [];
-    let light: PointLight | null = null;
+    let light: LightSource | null = null;
     if (s.kind === 'campfire') {
       for (let i = 0; i < 3; i++) {
         const f = new Mesh(this.flameGeo, i === 0 ? this.flameCore : this.flameMat);
@@ -123,22 +117,19 @@ export class StructureView {
         root.add(f);
         flames.push(f);
       }
-      light = new PointLight(0xff9a45, 0, 16, 1.6);
-      light.position.set(0, 1.0, 0);
-      root.add(light);
+      light = this.lights.add({ position: new Vector3(s.x, root.position.y + 1.0, s.z), color: new Color(0xff9a45), intensity: 0, distance: 16 });
     }
     let basket: Mesh | null = null;
     if (s.kind === 'storage' || s.kind === 'campfire') {
       const g = new SphereGeometry(0.28, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2);
       g.scale(1, 0.8, 1);
-      const berries = prep(g, 0xc0283c);
-      basket = new Mesh(berries, this.mat);
+      basket = new Mesh(prep(g, 0xc0283c), this.mat);
       basket.position.set(s.kind === 'storage' ? 1.35 : 1.0, s.kind === 'storage' ? 0.05 : 0.02, s.kind === 'storage' ? 1.25 : -0.8);
       basket.visible = false;
       root.add(basket);
     }
     this.group.add(root);
-    const e: Entry = { s, root, pieces, stakes, pile, flames, light, glowMat, basket, shown: [] };
+    const e: Entry = { s, root, pieces, body, glowMesh, glowMat, shownKey: '', stakes, pile, flames, light, basket };
     this.entries.set(s.id, e);
     this.sync(s);
   }
@@ -148,12 +139,15 @@ export class StructureView {
     if (!e) return;
     this.group.remove(e.root);
     e.pile.dispose();
+    if (e.body.geometry !== EMPTY) e.body.geometry.dispose();
+    e.glowMesh?.geometry.dispose();
     e.glowMat?.dispose();
+    if (e.light) this.lights.remove(e.light);
     this.entries.delete(id);
   }
 
   private groundY(s: Structure): number {
-    // Sit on the lowest nearby point so no corner floats.
+    // Sit on the lowest nearby point so no corner floats (footings hide the gap).
     let y = this.terrain.heightAt(s.x, s.z);
     const r = BLUEPRINTS[s.kind].radius * 0.6;
     for (let k = 0; k < 6; k++) {
@@ -163,19 +157,35 @@ export class StructureView {
     return y - 0.02;
   }
 
-  /** Update piece visibility and material piles after a state change. */
+  /** Update visible stages and material piles after a state change. */
   sync(s: Structure): void {
     const e = this.entries.get(s.id);
     if (!e) return;
     e.s = s;
     const p = s.complete ? 1 : s.progress;
-    for (const pc of e.pieces) pc.mesh.visible = !pc.glow ? p >= pc.at - 1e-4 : s.complete;
+    let key = '';
+    const visible: BufferGeometry[] = [];
+    e.pieces.forEach((pc, i) => {
+      if (pc.glow) return;
+      const on = p >= pc.at - 1e-4 && (pc.until === undefined || p < pc.until || (pc.until >= 1 && !s.complete));
+      if (on) {
+        key += `${i},`;
+        visible.push(pc.geo);
+      }
+    });
+    if (key !== e.shownKey) {
+      e.shownKey = key;
+      if (e.body.geometry !== EMPTY) e.body.geometry.dispose();
+      e.body.geometry = visible.length ? merge(visible) : EMPTY;
+    }
+    if (e.glowMesh) e.glowMesh.visible = s.complete;
     if (e.stakes) e.stakes.visible = !s.complete && p < 0.5;
     // Delivered-but-unused materials sit in a neat pile beside the site.
     const bp = BLUEPRINTS[s.kind];
-    const cost = bp.cost.wood ?? 0;
-    const unused = s.complete ? 0 : Math.max(0, Math.round((s.delivered.wood ?? 0) - p * cost));
-    const stored = s.complete ? s.stored.wood : 0;
+    const cost = (bp.cost.wood ?? 0) + (bp.cost.stone ?? 0);
+    const got = (s.delivered.wood ?? 0) + (s.delivered.stone ?? 0);
+    const unused = s.complete ? 0 : Math.max(0, Math.round(got - p * cost));
+    const stored = s.complete ? s.stored.wood + s.stored.stone : 0;
     const logs = Math.min(12, unused + stored);
     const r = Math.max(bp.blockRadius, 0.7) + 0.9;
     for (let i = 0; i < 12; i++) {
@@ -192,14 +202,16 @@ export class StructureView {
     }
     e.pile.instanceMatrix.needsUpdate = true;
     if (e.basket) {
-      const food = s.stored.berries + s.stored.fruit;
+      const food = s.stored.berries + s.stored.fruit + s.stored.mushrooms;
       e.basket.visible = s.complete && food > 0;
       const k = 0.5 + Math.min(1, food / 20) * 0.7;
       e.basket.scale.setScalar(k);
     }
+    // Fire damage chars the building.
+    if (s.damage > 0) e.body.scale.setScalar(1 - clamp01(s.damage) * 0.08);
   }
 
-  /** Per-frame animation: fire flicker, lights, window glow, pieces popping in. */
+  /** Per-frame animation: fire flicker, lights, window glow. */
   animate(time: number, darkness: number, occupied: (id: number) => number): void {
     for (const e of this.entries.values()) {
       const s = e.s;
@@ -222,18 +234,11 @@ export class StructureView {
       }
       if (e.glowMat) {
         const inside = occupied(s.id);
-        const target = s.complete && inside > 0 ? smoothstep(0.35, 0.85, darkness) * 0.95 : 0;
+        const always = s.kind === 'monument' || s.kind === 'workshop' || s.kind === 'hall';
+        const target = s.complete && (inside > 0 || always) ? smoothstep(0.35, 0.85, darkness) * 0.95 : 0;
         e.glowMat.opacity += (target - e.glowMat.opacity) * 0.05;
-        e.glowMat.color.setRGB(1, 0.72 + Math.sin(time * 3 + s.id) * 0.03, 0.38);
-      }
-      // Burning buildings char and tilt slightly as they take damage.
-      if (s.damage > 0) {
-        const c = 1 - clamp01(s.damage) * 0.6;
-        e.root.traverse((o: Object3D) => {
-          const m = (o as Mesh).material as MeshLambertMaterial | undefined;
-          if (m && m === this.mat) (o as Mesh).scale.setScalar(1 - s.damage * 0.08);
-        });
-        void c;
+        if (s.kind === 'monument') e.glowMat.color.setRGB(0.6, 0.92 + Math.sin(time * 2) * 0.05, 1);
+        else e.glowMat.color.setRGB(1, 0.72 + Math.sin(time * 3 + s.id) * 0.03, 0.38);
       }
     }
   }

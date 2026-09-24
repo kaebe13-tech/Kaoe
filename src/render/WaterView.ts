@@ -10,6 +10,7 @@ import {
   Vector3,
   type IUniform,
 } from 'three';
+import { BufferAttribute, BufferGeometry } from 'three';
 import type { Terrain } from '../world/Terrain';
 import type { TerrainUniforms } from './TerrainView';
 import { PAL } from './palette';
@@ -18,9 +19,16 @@ const vert = /* glsl */ `
 #include <common>
 #include <fog_pars_vertex>
 varying vec3 vWorld;
+#ifdef RIVER
+attribute vec3 aFlow; // x: distance along, y: across (-1..1), z: water level
+varying vec3 vFlow;
+#endif
 void main() {
   vec4 wp = modelMatrix * vec4(position, 1.0);
   vWorld = wp.xyz;
+  #ifdef RIVER
+  vFlow = aFlow;
+  #endif
   vec4 mvPosition = viewMatrix * wp;
   gl_Position = projectionMatrix * mvPosition;
   #include <fog_vertex>
@@ -47,7 +55,11 @@ uniform vec3 uSunDir;
 uniform vec3 uSunColor;
 uniform vec3 uAmbient;
 uniform vec3 uPond; // x, z, radius (radius 0 = ocean)
+uniform float uMagic;
 varying vec3 vWorld;
+#ifdef RIVER
+varying vec3 vFlow;
+#endif
 
 float wHash(vec2 p){ return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5453); }
 float wNoise(vec2 p){
@@ -85,12 +97,22 @@ vec2 waveSlope(vec2 p, float t, float fade) {
 
 void main() {
   float h = terrainH(vWorld.xz);
-  float depth = uLevel - h;
+  float level = uLevel;
+  #ifdef RIVER
+  level = vFlow.z;
+  #endif
+  float depth = level - h;
   vec3 toCam = cameraPosition - vWorld;
   float camDist = length(toCam);
   vec3 V = toCam / camDist;
   float fade = 1.0 - smoothstep(40.0, 320.0, camDist);
+  #ifdef RIVER
+  // Ripples carried downstream.
+  vec2 fp = vec2(vFlow.x * 0.55 - uTime * 1.3, vFlow.y * 2.2);
+  vec2 sl = noiseGrad(fp) * 0.16 + noiseGrad(fp * 2.3 + vec2(-uTime * 0.7, 3.1)) * 0.07 * fade;
+  #else
   vec2 sl = waveSlope(vWorld.xz, uTime, fade);
+  #endif
   vec3 N = normalize(vec3(-sl.x, 1.0, -sl.y));
 
   vec3 base = mix(uShallow, uMid, smoothstep(0.2, 2.8, depth));
@@ -115,6 +137,11 @@ void main() {
   float band = sin(depth * 5.5 - uTime * 1.6 + n1 * 4.0);
   float lines = smoothstep(0.82, 0.97, band) * (1.0 - smoothstep(0.25, 1.3, depth)) * step(0.35, n2) * (1.0 - uCalm);
   float foam = clamp(max(edge, lines * 0.85), 0.0, 1.0);
+  #ifdef RIVER
+  // Streaks of foam drifting with the current, thicker near the banks.
+  float streak = smoothstep(0.62, 0.95, wNoise(vec2(vFlow.x * 0.35 - uTime * 1.6, vFlow.y * 3.0)));
+  foam = max(foam, streak * (0.25 + 0.55 * smoothstep(0.55, 1.0, abs(vFlow.y))) * fade);
+  #endif
   vec3 foamCol = uFoam * (uAmbient * 0.9 + uSunColor * 0.55);
   col = mix(col, foamCol, foam);
 
@@ -122,6 +149,15 @@ void main() {
   alpha = max(alpha, foam * 0.95);
   alpha *= smoothstep(-0.02, 0.06, depth);
   if (uPond.z > 0.0) alpha *= 1.0 - smoothstep(uPond.z * 1.25, uPond.z * 1.5, length(vWorld.xz - uPond.xy));
+  #ifdef RIVER
+  alpha *= 1.0 - smoothstep(0.85, 1.0, abs(vFlow.y)) * (1.0 - smoothstep(0.0, 0.25, depth));
+  #endif
+  if (uMagic > 0.0) {
+    // The Moonwell glows from within, brightest at night.
+    float shimmer = 0.6 + 0.4 * sin(uTime * 2.0 + wNoise(vWorld.xz * 3.0) * 6.0);
+    col = mix(col, vec3(0.55, 0.95, 1.0) * (0.7 + shimmer * 0.5), uMagic * 0.55);
+    alpha = max(alpha, 0.75 * smoothstep(-0.02, 0.06, depth));
+  }
   gl_FragColor = vec4(col, alpha);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -165,7 +201,7 @@ export class WaterView {
       uFoam: { value: new Color(PAL.foam) },
     };
     this.shared = shared;
-    const make = (level: number, calm: number, shallow: number, mid: number, deep: number, pond = new Vector3(0, 0, 0)): ShaderMaterial => {
+    const make = (level: number, calm: number, shallow: number, mid: number, deep: number, pond = new Vector3(0, 0, 0), river = false, magic = 0): ShaderMaterial => {
       const uniforms: Record<string, IUniform> = UniformsUtils.merge([UniformsLib.fog]);
       Object.assign(uniforms, shared, {
         uLevel: { value: level },
@@ -174,6 +210,7 @@ export class WaterView {
         uMid: { value: new Color(mid) },
         uDeep: { value: new Color(deep) },
         uPond: { value: pond },
+        uMagic: { value: magic },
       });
       return new ShaderMaterial({
         uniforms,
@@ -182,10 +219,11 @@ export class WaterView {
         transparent: true,
         depthWrite: false,
         fog: true,
+        defines: river ? { RIVER: 1 } : {},
       });
     };
 
-    const oceanGeo = new PlaneGeometry(2400, 2400, 1, 1);
+    const oceanGeo = new PlaneGeometry(4000, 4000, 1, 1);
     oceanGeo.rotateX(-Math.PI / 2);
     const ocean = new Mesh(oceanGeo, make(0, 0, PAL.waterShallow, PAL.waterMid, PAL.waterDeep));
     ocean.name = 'ocean';
@@ -195,10 +233,48 @@ export class WaterView {
     for (const p of terrain.ponds) {
       const g = new CircleGeometry(p.radius * 1.6, 48);
       g.rotateX(-Math.PI / 2);
-      const mesh = new Mesh(g, make(p.level, 1, PAL.pondShallow, 0x3f9c9a, PAL.pondDeep, new Vector3(p.x, p.z, p.radius)));
+      const mesh = new Mesh(g, make(p.level, 1, p.magic ? 0x8ff0e8 : PAL.pondShallow, p.magic ? 0x3fb8c0 : 0x3f9c9a, p.magic ? 0x2a6f9a : PAL.pondDeep, new Vector3(p.x, p.z, p.radius), false, p.magic ? 1 : 0));
       mesh.position.set(p.x, p.level, p.z);
       mesh.renderOrder = 1;
       mesh.name = `pond-${p.id}`;
+      this.group.add(mesh);
+    }
+
+    // Rivers: a ribbon following each channel, sloping with its water level.
+    const riverMat = make(0, 0.7, 0x6fd3c8, 0x3aa6b8, 0x2a6f8a, new Vector3(0, 0, 0), true);
+    for (const r of terrain.rivers) {
+      const pts = r.points;
+      const pos: number[] = [];
+      const flow: number[] = [];
+      const idx: number[] = [];
+      let s = 0;
+      for (let k = 0; k < pts.length; k++) {
+        const p = pts[k]!;
+        const a = pts[Math.max(0, k - 1)]!;
+        const b = pts[Math.min(pts.length - 1, k + 1)]!;
+        if (k > 0) s += Math.hypot(p.x - pts[k - 1]!.x, p.z - pts[k - 1]!.z);
+        const tx = b.x - a.x;
+        const tz = b.z - a.z;
+        const tl = Math.hypot(tx, tz) || 1;
+        const nx = -tz / tl;
+        const nz = tx / tl;
+        const half = p.width + 1.6;
+        const y = Math.max(p.level, -0.05) + 0.02;
+        pos.push(p.x - nx * half, y, p.z - nz * half, p.x + nx * half, y, p.z + nz * half);
+        flow.push(s, -1, y, s, 1, y);
+        if (k > 0) {
+          const i = k * 2;
+          idx.push(i - 2, i - 1, i, i - 1, i + 1, i);
+        }
+      }
+      const g = new BufferGeometry();
+      g.setAttribute('position', new BufferAttribute(new Float32Array(pos), 3));
+      g.setAttribute('aFlow', new BufferAttribute(new Float32Array(flow), 3));
+      g.setIndex(idx);
+      g.computeBoundingSphere();
+      const mesh = new Mesh(g, riverMat);
+      mesh.renderOrder = 1;
+      mesh.name = `river-${r.id}`;
       this.group.add(mesh);
     }
   }

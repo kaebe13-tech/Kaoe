@@ -13,6 +13,10 @@ export class NavGrid {
   readonly terrainOk: Uint8Array;
   readonly blockers: Uint16Array;
   readonly cost: Float32Array;
+  /** Cells that are shallow river water (walkable, slow). */
+  readonly wade: Uint8Array;
+  /** Connected land masses (terrain only, ignoring blockers); 0 = unwalkable. */
+  readonly component: Int32Array;
   /** Incremented whenever walkability changes; paths computed earlier may be stale. */
   version = 0;
 
@@ -21,6 +25,7 @@ export class NavGrid {
     this.terrainOk = new Uint8Array(n);
     this.blockers = new Uint16Array(n);
     this.cost = new Float32Array(n);
+    this.wade = new Uint8Array(n);
     for (let cz = 0; cz < this.size; cz++) {
       for (let cx = 0; cx < this.size; cx++) {
         const x = this.toWorld(cx);
@@ -28,13 +33,22 @@ export class NavGrid {
         const h = terrain.heightAt(x, z);
         const i = cz * this.size + cx;
         const slope = terrain.slopeAt(x, z);
-        const ok = h > 0.22 && slope < 1.05 && !terrain.pondAt(x, z);
+        let ok = h > 0.22 && slope < 1.05;
+        let cost = 1 + slope * 1.6 + (h < 0.7 ? 0.35 : 0);
+        const depth = terrain.waterDepthAt(x, z);
+        if (depth > 0.04) {
+          // Rivers can be waded where they are shallow; lakes cannot.
+          if (terrain.isRiver(x, z) && depth < 1.15) {
+            cost += 3 + depth * 5;
+            this.wade[i] = 1;
+          } else ok = false;
+        }
         this.terrainOk[i] = ok ? 1 : 0;
         // Steeper ground and wet sand are more tiring; humans prefer gentle routes.
-        this.cost[i] = 1 + slope * 1.6 + (h < 0.7 ? 0.35 : 0);
+        this.cost[i] = cost;
       }
     }
-    // Keep a one-cell margin from pond water so agents don't wade along the shore.
+    // Keep a one-cell margin from lake water so agents don't wade along the shore.
     for (const p of terrain.ponds) {
       const r = Math.ceil(p.radius * 1.8);
       const pcx = this.cellX(p.x);
@@ -51,6 +65,45 @@ export class NavGrid {
         }
       }
     }
+    // Label connected land so impossible trips (across the sea, onto cliffs) fail instantly.
+    this.component = new Int32Array(n);
+    const stack = new Int32Array(n);
+    let label = 0;
+    for (let i = 0; i < n; i++) {
+      if (!this.terrainOk[i] || this.component[i]) continue;
+      label++;
+      let sp = 0;
+      stack[sp++] = i;
+      this.component[i] = label;
+      while (sp > 0) {
+        const c = stack[--sp]!;
+        const cx = c % this.size;
+        const cz = (c - cx) / this.size;
+        for (let k = 0; k < 4; k++) {
+          const nx = cx + (k === 0 ? 1 : k === 1 ? -1 : 0);
+          const nz = cz + (k === 2 ? 1 : k === 3 ? -1 : 0);
+          if (nx < 0 || nz < 0 || nx >= this.size || nz >= this.size) continue;
+          const j = nz * this.size + nx;
+          if (!this.terrainOk[j] || this.component[j]) continue;
+          this.component[j] = label;
+          stack[sp++] = j;
+        }
+      }
+    }
+  }
+
+  /** Whether two points are on the same connected land (ignoring temporary blockers). */
+  connected(ax: number, az: number, bx: number, bz: number): boolean {
+    const a = this.componentAt(ax, az);
+    const b = this.componentAt(bx, bz);
+    return a > 0 && a === b;
+  }
+
+  componentAt(x: number, z: number): number {
+    const cx = this.cellX(x);
+    const cz = this.cellZ(z);
+    if (!this.inside(cx, cz)) return 0;
+    return this.component[cz * this.size + cx]!;
   }
 
   inside(cx: number, cz: number): boolean {

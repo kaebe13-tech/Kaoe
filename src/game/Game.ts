@@ -18,8 +18,9 @@ import { WorldSession } from './WorldSession';
 import { Emitter } from '../core/events';
 import { seeThroughUniforms } from '../render/seeThrough';
 
-export type Speed = 0 | 1 | 2 | 4;
-export type Tool = 'select' | 'lightning' | 'rain' | 'bless' | 'heal';
+export const SPEEDS = [0, 0.25, 0.5, 1, 2, 4, 8, 16] as const;
+export type Speed = (typeof SPEEDS)[number];
+export type Tool = string;
 
 export interface GameEvents {
   select: number | null;
@@ -29,7 +30,9 @@ export interface GameEvents {
   frame: number;
 }
 
-const MAX_STEPS_PER_FRAME = 40;
+const MAX_STEPS_PER_FRAME = 60;
+/** Simulation time budget per rendered frame; beyond it the world simply runs slower. */
+const SIM_BUDGET_MS = 22;
 
 /**
  * Owns the renderer, camera, input and the current world session, and runs the
@@ -61,7 +64,12 @@ export class Game {
   stepsLastFrame = 0;
   private readonly mouse = { x: -1, y: -1, inside: false };
 
-  constructor(private readonly container: HTMLElement, seed: number, population = 6) {
+  /** Actual simulated speed over the last second (can be below the setting when the budget is hit). */
+  actualSpeed = 1;
+  private simSecondsAcc = 0;
+  private realSecondsAcc = 0;
+
+  constructor(private readonly container: HTMLElement, seed: number, population = 6, civs = 4) {
     this.renderer = new WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(container.clientWidth, container.clientHeight);
@@ -73,13 +81,13 @@ export class Game {
     this.renderer.domElement.id = 'world-canvas';
     container.appendChild(this.renderer.domElement);
 
-    this.camera = new PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.3, 2400);
+    this.camera = new PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.3, 4000);
     this.scene.background = new Color(0x88bbee);
     this.scene.add(this.sky.mesh, ...this.lighting.objects);
     this.scene.fog = this.lighting.fog;
 
     const world = new World(seed);
-    world.spawnTribe(population);
+    world.spawnCivilizations(civs, population);
     this.session = new WorldSession(world, this.scene, this.camera);
     this.session.effects.onFlash = (k) => this.onFlash?.(k);
     // One step so everyone has formed an intention before the first frame.
@@ -103,13 +111,14 @@ export class Game {
     return this.session.world;
   }
 
-  /** Frame the camera on the tribe at the start of a world. */
+  /** Frame the camera on the first civilization at the start of a world. */
   private frameStart(): void {
     const w = this.world;
+    const home = w.civs[0]?.capital ?? w.start;
     this.controls.follow = null;
-    this.controls.jumpTo(w.start.x, w.start.z, 25);
-    this.controls.yaw = Math.atan2(w.start.x, w.start.z) + 0.5;
-    this.controls.pitch = 0.58;
+    this.controls.jumpTo(home.x, home.z, 34);
+    this.controls.yaw = Math.atan2(home.x, home.z) + 0.5;
+    this.controls.pitch = 0.62;
     this.controls.snap();
   }
 
@@ -195,6 +204,9 @@ export class Game {
   /** Hook for god powers; set by the powers module. */
   onGroundClick: ((p: Vector3, humanId: number | null) => void) | null = null;
 
+  /** Force civilization borders visible (toggled from the UI). */
+  showBorders = false;
+
   private onClick = (e: MouseEvent) => {
     if (this.controls.wasDrag) return;
     const human = this.pickHuman(e.clientX, e.clientY);
@@ -248,18 +260,31 @@ export class Game {
    * Advance simulation time for one frame of real time, honouring the speed setting.
    * Returns the number of fixed steps taken.
    */
-  stepSim(realDt: number): number {
+  stepSim(realDt: number, budgetMs = SIM_BUDGET_MS): number {
     const sim = this.session.sim;
     let steps = 0;
     if (this.speed > 0) {
       this.acc += realDt * this.speed * this.debugSpeed;
       const maxSteps = MAX_STEPS_PER_FRAME * Math.max(1, this.debugSpeed);
+      const t0 = performance.now();
       while (this.acc >= SIM_DT && steps < maxSteps) {
         sim.step(SIM_DT);
         this.acc -= SIM_DT;
         steps++;
+        // Out of time this frame: drop the backlog instead of spiralling.
+        if (performance.now() - t0 > budgetMs) {
+          this.acc = Math.min(this.acc, SIM_DT);
+          break;
+        }
       }
       if (steps >= maxSteps) this.acc = Math.min(this.acc, SIM_DT);
+    }
+    this.simSecondsAcc += steps * SIM_DT;
+    this.realSecondsAcc += realDt;
+    if (this.realSecondsAcc >= 1) {
+      this.actualSpeed = this.simSecondsAcc / this.realSecondsAcc;
+      this.simSecondsAcc = 0;
+      this.realSecondsAcc = 0;
     }
     return steps;
   }
@@ -297,8 +322,8 @@ export class Game {
     const s = this.session;
     const w = s.world;
     const rainHere = w.rainAt(this.controls.focus.x, this.controls.focus.z);
-    const overcast = Math.min(1, Math.max(rainHere, w.weather.anyRain * 0.35));
-    const look = this.lighting.update(w.hour, this.controls.focus, overcast);
+    const overcast = Math.min(1, Math.max(rainHere, w.weather.fogAt?.(this.controls.focus.x, this.controls.focus.z) ?? 0, w.weather.anyRain * 0.25));
+    const look = this.lighting.update(w.worldHour, this.controls.focus, overcast, this.controls.currentDistance);
     const su = this.sky.material.uniforms;
     su.uZenith!.value.copy(look.zenith);
     su.uHorizon!.value.copy(look.horizon);
@@ -325,10 +350,17 @@ export class Game {
     s.terrainView.uniforms.uWet.value += (rainHere - s.terrainView.uniforms.uWet.value) * Math.min(1, dt * 0.5);
     const amb = look.hemiSky.clone().multiplyScalar(look.hemiIntensity * 0.55);
     s.water.setLook({ skyHorizon: look.horizon, skyZenith: look.zenith, sunDir: look.lightDir, sunColor: look.sunColor.clone().multiplyScalar(look.sunIntensity / 2.5), ambient: amb });
-    s.vegetation.update(dt, this.realTime);
+    s.terrainView.updateLod(this.camera.position);
+    const dist = this.controls.currentDistance;
+    s.terrainView.uniforms.uBorders.value = this.showBorders ? Math.max(0.35, Math.min(1, (dist - 60) / 140)) : Math.min(1, Math.max(0, (dist - 150) / 160));
+    s.vegetation.update(dt, this.realTime, this.camera, this.controls.focus, look.darkness);
     s.clouds.update(dt, look.sunColor, look.darkness, overcast);
     s.birds.update(this.realTime, look.darkness);
-    s.structures.animate(this.realTime, look.darkness, (id) => w.agents.filter((a) => a.inside === id && a.alive).length);
+    const inside = new Map<number, number>();
+    for (const a of w.agents) if (a.alive && a.inside !== null) inside.set(a.inside, (inside.get(a.inside) ?? 0) + 1);
+    s.structures.animate(this.realTime, look.darkness, (id) => inside.get(id) ?? 0);
+    s.landmarks.animate(this.realTime, look.darkness);
+    s.lightPool.update(this.controls.focus);
     s.humans.update(w.agents, alpha, dt, this.speed === 0);
     s.effects.update(dt, this.speed > 0 ? dt * this.speed * this.debugSpeed : 0, this.realTime, this.controls.focus, this.controls.currentDistance, look.darkness);
     const sel = this.selectedId !== null ? w.agent(this.selectedId) ?? null : null;

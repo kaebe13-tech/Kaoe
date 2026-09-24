@@ -1,5 +1,5 @@
 import type { ResourceKind } from '../sim/types';
-import { ISLAND_RADIUS } from '../world/config';
+import { MAP_CELL, MAP_N, WORLD_HALF } from '../world/config';
 
 export interface ResourceMemory {
   id: number;
@@ -27,13 +27,13 @@ export interface DangerMemory {
   x: number;
   z: number;
   at: number;
-  kind: 'lightning' | 'fire' | 'death';
+  kind: 'lightning' | 'fire' | 'death' | 'hostile' | 'quake' | 'meteor';
 }
 
-/** Coarse exploration grid: 10x10 unit cells covering the island. */
-export const EXPLORE_CELL = 10;
-export const EXPLORE_N = Math.ceil((ISLAND_RADIUS * 2.4) / EXPLORE_CELL);
-export const EXPLORE_ORIGIN = -(EXPLORE_N * EXPLORE_CELL) / 2;
+/** Coarse exploration grid (same cells as the civilization map). */
+export const EXPLORE_CELL = MAP_CELL;
+export const EXPLORE_N = MAP_N;
+export const EXPLORE_ORIGIN = -WORLD_HALF;
 
 export class Memory {
   readonly resources = new Map<number, ResourceMemory>();
@@ -41,7 +41,7 @@ export class Memory {
   readonly dangers: DangerMemory[] = [];
   /** Time each coarse cell was last seen (0 = never). */
   readonly explored = new Float32Array(EXPLORE_N * EXPLORE_N);
-  static readonly MAX_RESOURCES = 90;
+  static readonly MAX_RESOURCES = 120;
 
   rememberResource(entry: Omit<ResourceMemory, 'avoidUntil'> & { avoidUntil?: number }): boolean {
     const prev = this.resources.get(entry.id);
@@ -63,7 +63,7 @@ export class Memory {
     let worst: ResourceMemory | null = null;
     let worstScore = Infinity;
     for (const m of this.resources.values()) {
-      const value = (m.kind === 'tree' ? 0.4 : m.kind === 'rock' ? 0.1 : 1) * (1 + m.amount * 0.2);
+      const value = (m.kind === 'tree' ? 0.4 : m.kind === 'rock' ? 0.5 : m.kind === 'crystal' ? 1.5 : 1) * (1 + m.amount * 0.2);
       const score = value * 1e6 + m.seenAt;
       if (score < worstScore) {
         worstScore = score;
@@ -108,7 +108,13 @@ export class Memory {
 
   knownFoodCount(): number {
     let n = 0;
-    for (const m of this.resources.values()) if (m.kind === 'berryBush' || m.kind === 'fruitTree') n++;
+    for (const m of this.resources.values()) if (m.kind === 'berryBush' || m.kind === 'fruitTree' || m.kind === 'mushroom') n++;
+    return n;
+  }
+
+  knownCount(kind: ResourceKind): number {
+    let n = 0;
+    for (const m of this.resources.values()) if (m.kind === kind && m.amount > 0) n++;
     return n;
   }
 }

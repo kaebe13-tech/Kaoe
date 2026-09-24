@@ -85,7 +85,7 @@ export class LightingRig {
   readonly fog: Fog;
   readonly look: DayLook;
   private readonly target = new Object3D();
-  private readonly shadowExtent = 55;
+  private shadowExtent = 55;
 
   constructor() {
     this.sun.castShadow = true;
@@ -126,7 +126,7 @@ export class LightingRig {
   }
 
   /** Compute the look for a given hour. `overcast` 0..1 dims and greys everything (rain). */
-  update(hour: number, focus: Vector3, overcast: number): DayLook {
+  update(hour: number, focus: Vector3, overcast: number, camDistance = 50): DayLook {
     const L = this.look;
     L.hour = hour;
     let i = 0;
@@ -181,15 +181,32 @@ export class LightingRig {
     this.hemi.groundColor.copy(L.hemiGround);
     this.hemi.intensity = L.hemiIntensity;
     this.fog.color.copy(L.fog);
-    this.fog.near = lerp(160, 70, overcast);
-    this.fog.far = lerp(620, 320, overcast);
+    // Fog recedes as the camera climbs so the whole world stays visible from above.
+    const reach = Math.max(1, camDistance / 60);
+    this.fog.near = lerp(160, 70, overcast) * Math.min(4, 0.7 + reach * 0.5);
+    this.fog.far = lerp(620, 320, overcast) * Math.min(3.2, 0.8 + reach * 0.35);
+
+    // Shadows cover what's on screen: tight and crisp up close, broad and softer from afar.
+    const extent = Math.min(220, Math.max(40, camDistance * 1.25));
+    if (Math.abs(extent - this.shadowExtent) > 4) {
+      this.shadowExtent = extent;
+      const cam = this.sun.shadow.camera;
+      cam.left = -extent;
+      cam.right = extent;
+      cam.top = extent;
+      cam.bottom = -extent;
+      cam.far = 400 + extent * 2;
+      cam.updateProjectionMatrix();
+      this.sun.shadow.normalBias = 0.04 * (extent / 55);
+    }
 
     // Keep the shadow frustum centred on what the camera looks at, snapped to texels to avoid shimmer.
     const texel = (this.shadowExtent * 2) / this.sun.shadow.mapSize.x;
     const fx = Math.round(focus.x / texel) * texel;
     const fz = Math.round(focus.z / texel) * texel;
     this.target.position.set(fx, focus.y, fz);
-    this.sun.position.set(fx + L.lightDir.x * 150, focus.y + L.lightDir.y * 150, fz + L.lightDir.z * 150);
+    const back = 150 + this.shadowExtent;
+    this.sun.position.set(fx + L.lightDir.x * back, focus.y + L.lightDir.y * back, fz + L.lightDir.z * back);
     this.target.updateMatrixWorld();
     return L;
   }
