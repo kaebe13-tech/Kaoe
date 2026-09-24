@@ -3,6 +3,7 @@ import type { Game } from '../game/Game';
 import { h, setHtml } from './dom';
 import { ICON_COLORS, icon } from './icons';
 import { activityText } from './agentInfo';
+import { BLUEPRINTS } from '../sim/blueprints';
 
 interface Label {
   el: HTMLElement;
@@ -21,6 +22,7 @@ export class WorldLabels {
   private readonly labels = new Map<number, Label>();
   private readonly speeches = new Map<number, { text: string; until: number }>();
   private readonly civLabels = new Map<number, HTMLElement>();
+  private readonly siteLabels = new Map<number, HTMLElement>();
   showAll = true;
 
   constructor(private readonly game: Game) {}
@@ -30,12 +32,49 @@ export class WorldLabels {
     this.labels.clear();
     for (const l of this.civLabels.values()) l.remove();
     this.civLabels.clear();
+    for (const l of this.siteLabels.values()) l.remove();
+    this.siteLabels.clear();
     this.speeches.clear();
   }
 
   /** Show words above someone's head for a while (real seconds). */
   say(agentId: number, text: string, seconds = 9): void {
     this.speeches.set(agentId, { text: text.length > 150 ? `${text.slice(0, 148)}…` : text, until: performance.now() / 1000 + seconds });
+  }
+
+  /** Progress bars over buildings going up (near the camera). */
+  private updateSites(rect: DOMRect): void {
+    const g = this.game;
+    const w = g.world;
+    const seen = new Set<number>();
+    for (const s of w.structures) {
+      if (s.complete || s.kind === 'grave') continue;
+      const d = Math.hypot(s.x - g.camera.position.x, s.z - g.camera.position.z);
+      if (d > 140) continue;
+      _v.set(s.x, w.terrain.heightAt(s.x, s.z) + 3.2, s.z).project(g.camera);
+      if (_v.z > 1) continue;
+      seen.add(s.id);
+      let el = this.siteLabels.get(s.id);
+      if (!el) {
+        el = h('div.sitelbl', {}, [h('span'), h('i', {}, [h('b')])]);
+        this.el.append(el);
+        this.siteLabels.set(s.id, el);
+      }
+      const x = rect.left + ((_v.x + 1) / 2) * rect.width;
+      const y = rect.top + ((1 - _v.y) / 2) * rect.height;
+      el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -100%)`;
+      el.classList.toggle('far', d > 70);
+      const pct = Math.round(s.progress * 100);
+      const label = `${BLUEPRINTS[s.kind].name} ${pct}%`;
+      const span = el.firstChild as HTMLElement;
+      if (span.textContent !== label) span.textContent = label;
+      (el.lastChild!.firstChild as HTMLElement).style.width = `${pct}%`;
+    }
+    for (const [id, el] of this.siteLabels) {
+      if (seen.has(id)) continue;
+      el.remove();
+      this.siteLabels.delete(id);
+    }
   }
 
   /** Names of the peoples over their capitals when the camera is far away. */
@@ -128,5 +167,6 @@ export class WorldLabels {
     }
     for (const [id, l] of this.labels) if (!seen.has(id)) l.el.classList.add('hidden');
     this.updateCivLabels(rect, camDist);
+    this.updateSites(rect);
   }
 }

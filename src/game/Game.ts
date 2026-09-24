@@ -20,7 +20,12 @@ import { seeThroughUniforms } from '../render/seeThrough';
 import { TargetRing } from '../render/TargetRing';
 import { territoryAt } from '../civ/civSystem';
 
-export const SPEEDS = [0, 0.25, 0.5, 1, 2, 4, 8, 16] as const;
+export const SPEEDS = [0, 0.25, 0.5, 1, 2, 4, 8, 16, 1000] as const;
+/** At or above this speed the world runs as a time-lapse: coarser steps, most of each frame spent simulating. */
+export const TURBO_SPEED = 100;
+/** Step size and per-frame simulation budget in time-lapse mode. */
+const TURBO_DT = SIM_DT * 8;
+const TURBO_BUDGET_MS = 100;
 export type Speed = (typeof SPEEDS)[number];
 export type Tool = string;
 
@@ -68,6 +73,8 @@ export class Game {
   /** Extra multiplier for debugging (8x, 16x...). */
   debugSpeed = 1;
   private acc = 0;
+  /** Size of the fixed steps taken in the last frame (larger in time-lapse). */
+  private stepDt = SIM_DT;
   private last = performance.now();
   private realTime = 0;
   fps = 60;
@@ -303,30 +310,38 @@ export class Game {
   stepSim(realDt: number, budgetMs = SIM_BUDGET_MS): number {
     const sim = this.session.sim;
     let steps = 0;
+    const turbo = this.speed >= TURBO_SPEED;
+    const dt = turbo ? TURBO_DT : SIM_DT;
+    this.stepDt = dt;
     if (this.speed > 0) {
       this.acc += realDt * this.speed * this.debugSpeed;
-      const maxSteps = MAX_STEPS_PER_FRAME * Math.max(1, this.debugSpeed);
+      const maxSteps = turbo ? 100000 : MAX_STEPS_PER_FRAME * Math.max(1, this.debugSpeed);
+      const budget = turbo ? TURBO_BUDGET_MS : budgetMs;
       const t0 = performance.now();
-      while (this.acc >= SIM_DT && steps < maxSteps) {
-        sim.step(SIM_DT);
-        this.acc -= SIM_DT;
+      while (this.acc >= dt && steps < maxSteps) {
+        sim.step(dt);
+        this.acc -= dt;
         steps++;
         // Out of time this frame: drop the backlog instead of spiralling.
-        if (performance.now() - t0 > budgetMs) {
-          this.acc = Math.min(this.acc, SIM_DT);
+        if (performance.now() - t0 > budget) {
+          this.acc = Math.min(this.acc, dt);
           break;
         }
       }
-      if (steps >= maxSteps) this.acc = Math.min(this.acc, SIM_DT);
+      if (steps >= maxSteps) this.acc = Math.min(this.acc, dt);
     }
-    this.simSecondsAcc += steps * SIM_DT;
+    this.simSecondsAcc += steps * dt;
     this.realSecondsAcc += realDt;
-    if (this.realSecondsAcc >= 1) {
+    if (this.realSecondsAcc >= 0.5) {
       this.actualSpeed = this.simSecondsAcc / this.realSecondsAcc;
       this.simSecondsAcc = 0;
       this.realSecondsAcc = 0;
     }
     return steps;
+  }
+
+  get turbo(): boolean {
+    return this.speed >= TURBO_SPEED;
   }
 
   private frame = (now: number) => {
@@ -341,7 +356,7 @@ export class Game {
     const steps = this.stepSim(realDt);
     this.stepsLastFrame = steps;
     this.simMsFrame = performance.now() - t0;
-    const alpha = this.speed > 0 ? this.acc / SIM_DT : 1;
+    const alpha = this.speed > 0 ? Math.min(1, this.acc / this.stepDt) : 1;
 
     // Hover feedback (throttled: picking projects every human).
     const wantsPerson = this.tool === 'select' || (this.targeting !== null && (this.targeting.kind === 'person' || this.targeting.kind === 'civ'));

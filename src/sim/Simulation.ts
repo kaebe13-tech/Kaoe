@@ -65,7 +65,9 @@ export class Simulation {
       civ.lastSubsteps = n;
       totalSub += n;
     }
-    w.paths.step(Math.max(4, Math.min(24, 3 + totalSub)));
+    // Bigger steps (time-lapse) must still serve as many path requests per game second.
+    const scale = Math.max(1, Math.round(dt / 0.05));
+    w.paths.step(Math.max(4, Math.min(24, 3 + totalSub)) * scale, 6 * Math.min(scale, 3));
     const t1 = performance.now();
     this.phase.paths = t1 - t0;
     let agentSteps = 0;

@@ -1,7 +1,9 @@
 import type { Game } from '../game/Game';
 import { CIV_SPEEDS, RELATION_LABEL, type CivSpeed } from '../civ/Civilization';
 import { resyncing } from '../sim/Simulation';
-import { civFood, civStored, eraOf } from '../sim/settlement';
+import { civFood, civStored, eraOf, eraProgress, sitesOf } from '../sim/settlement';
+import { MAX_CIV_POPULATION } from '../sim/family';
+import { BLUEPRINTS } from '../sim/blueprints';
 import { PERSONAS } from '../civ/persona';
 import { LANDMARK_INFO } from '../world/biomes';
 import { escapeHtml, h, hex, setHtml } from './dom';
@@ -94,7 +96,10 @@ export class CivBar {
       .map((c) => {
         const pop = c.population;
         const sp = c.speed === 1 ? '' : `<span class="cspd">${SPEED_LABEL(c.speed)}</span>`;
-        return `<button class="cchip${this.selected === c.id ? ' on' : ''}${pop === 0 ? ' gone' : ''}" data-civ="${c.id}" style="--c:${hex(c.color)}"><span class="cdot"></span><span class="cname">${escapeHtml(c.name.replace(/^the /, ''))}</span><span class="cpop">${pop}</span>${sp}</button>`;
+        const ep = c.capital ? eraProgress(w, c.capital.id) : null;
+        const tip = ep ? (ep.next ? `${ep.era} → ${ep.next}: ${Math.round(ep.frac * 100)}% (needs ${ep.need})` : `${ep.era}: fully grown`) : '';
+        const prog = ep ? `<span class="cprog" title="${escapeHtml(tip)}"><i style="width:${Math.round(ep.frac * 100)}%"></i></span>` : '';
+        return `<button class="cchip${this.selected === c.id ? ' on' : ''}${pop === 0 ? ' gone' : ''}" data-civ="${c.id}" style="--c:${hex(c.color)}" title="${escapeHtml(tip)}"><span class="cdot"></span><span class="cname">${escapeHtml(c.name.replace(/^the /, ''))}</span><span class="cpop">${pop}</span>${sp}${prog}</button>`;
       })
       .join('');
     setHtml(this.el, chips);
@@ -133,6 +138,28 @@ export class CivBar {
     const done = civ.requests.filter((r) => r.status !== 'open').slice(-3).reverse().map((r) => `<li><span class="rs ${r.status}">${r.status}</span> ${escapeHtml(r.text)}</li>`).join('');
     const promises = (civ.mind.promises ?? []).slice(-3).reverse().map((p) => `<li><span class="rs ${p.status === 'kept' ? 'granted' : p.status === 'broken' ? 'refused' : 'open'}">${p.status === 'open' ? 'promised' : p.status}</span> ${escapeHtml(p.text)}</li>`).join('');
     const commands = civ.mind.commands.slice(-3).reverse().map((c) => `<li><span class="rs ${c.accepted ? 'granted' : 'refused'}">${c.accepted ? 'obeyed' : 'refused'}</span> ${escapeHtml(c.text)}</li>`).join('');
+    // Progress: the road to the next era, and how far along their efforts are.
+    const pbar = (label: string, v: number, col: string, text: string) => `<div class="pb"><div class="pbt"><span>${label}</span><span>${escapeHtml(text)}</span></div><i><b style="width:${Math.round(Math.max(0, Math.min(1, v)) * 100)}%;background:${col}"></b></i></div>`;
+    const ep = cap ? eraProgress(w, cap.id) : null;
+    const regions = w.terrain.regions.length || 1;
+    const food = civFood(w, civ);
+    const want = Math.max(1, civ.population * 5);
+    const site = cap ? sitesOf(w, cap.id)[0] : undefined;
+    const goal = civ.objectives[civ.objectives.length - 1];
+    let goalBar = '';
+    if (goal) {
+      const left = Math.max(0, goal.until - w.worldTime);
+      const span = Math.max(1, goal.until - goal.since);
+      goalBar = pbar(`Goal: ${goal.kind.replace(/_/g, ' ').toLowerCase()}`, 1 - left / span, '#8fd3ff', goal.status || `${Math.ceil(left / 20)} h left`);
+    }
+    const progress = [
+      ep ? pbar(ep.next ? `${ep.era} → ${ep.next}` : ep.era, ep.frac, '#f2c46b', ep.next ? `${Math.round(ep.frac * 100)}% · needs ${ep.need}` : 'fully grown') : '',
+      site ? pbar(`Building: ${BLUEPRINTS[site.kind].name.toLowerCase()}`, site.progress, '#d49a5c', `${Math.round(site.progress * 100)}%`) : '',
+      pbar('Food stores', food / want, '#ff7b6b', `${food} / ${want}`),
+      pbar('Explored', civ.knowledge.regions.size / regions, '#8ee6d0', `${civ.knowledge.regions.size} of ${regions} lands`),
+      pbar('People', civ.population / MAX_CIV_POPULATION, '#f5c451', `${civ.population} / ${MAX_CIV_POPULATION}`),
+      goalBar,
+    ].join('');
     const mindSrc = civ.mind.planSource === 'ai' ? '<span class="aitag">✦ AI mind</span>' : '<span class="aitag local">local mind</span>';
     const html = `
       <div class="ch" style="--c:${hex(civ.color)}"><span class="banner"></span><div><div class="cn">${escapeHtml(civ.name)}</div><div class="cp">the ${escapeHtml(civ.people)} · ${era} · ${mood}</div></div><button class="x" data-close>✕</button></div>
@@ -142,6 +169,7 @@ export class CivBar {
       <div class="cactions"><button data-talk ${leader ? '' : 'disabled'}>💬 Speak to ${escapeHtml(leader?.name ?? 'their leader')}</button><button data-history>📜 History</button></div>
       ${reqs}
       <div class="stats"><span>👥 ${civ.population}</span><span>🏘 ${civ.settlements.length}</span><span>🍎 ${civFood(w, civ)}</span><span>🪵 ${civStored(w, civ, 'wood')}</span><span>🪨 ${civStored(w, civ, 'stone')}</span><span>💎 ${civStored(w, civ, 'crystal')}</span></div>
+      <div class="sect">Progress</div><div class="progress">${progress}</div>
       <div class="sect">Speed of their time <span class="muted">· their day ${civ.day}, ${String(Math.floor(civ.hour)).padStart(2, '0')}:${String(Math.floor((civ.hour % 1) * 60)).padStart(2, '0')}${resyncing(civ, w.worldTime) ? ' · falling back into step with the sun' : ''}</span></div>
       <div class="cspeeds">${speeds}</div>
       <div class="sect">What they want</div><ul class="obj">${objectives}</ul>

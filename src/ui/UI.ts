@@ -49,6 +49,9 @@ export class UI {
   private readonly chronicle: Chronicle;
   readonly civBar: CivBar;
   private readonly dayEl = h('div.hud-day');
+  private readonly dayBar = h('i');
+  private readonly turboEl = h('div.turbo.glass');
+  private turboStart: { day: number; t: number } | null = null;
   private readonly clockEl = h('span');
   private readonly dialIcon = h('span.icon');
   private readonly weatherEl = h('span.hud-weather');
@@ -92,7 +95,7 @@ export class UI {
     this.civBar.onTalk = (civId) => this.convo.talkToLeader(civId);
     this.civBar.onHistory = (civId) => this.chronicle.showCiv(civId);
     this.help = this.buildHelp();
-    this.root.append(h('div.vignette'), this.flashEl, this.labels.el, this.minimap.el, this.chronicle.el, this.buildTime(), this.buildControls(), this.pausedBadge, this.civBar.el, this.civBar.panel, this.feed, this.buildPowers(), this.hint, this.inspector.el, this.convo.el, this.convo.pill, this.toast, this.help, this.tooltip, this.modal);
+    this.root.append(h('div.vignette'), this.flashEl, this.labels.el, this.minimap.el, this.chronicle.el, this.buildTime(), this.buildControls(), this.pausedBadge, this.turboEl, this.civBar.el, this.civBar.panel, this.feed, this.buildPowers(), this.hint, this.inspector.el, this.convo.el, this.convo.pill, this.toast, this.help, this.tooltip, this.modal);
     this.aiChip.addEventListener('click', () => this.openMenu());
     hooks.mind.events.on('status', () => this.renderAi());
     this.renderAi();
@@ -150,16 +153,17 @@ export class UI {
     const dial = h('div.hud-dial', {}, [this.dialIcon]);
     const clock = h('div.hud-clock', {}, [iconEl(icon('clock')), this.clockEl, this.weatherEl]);
     this.weatherEl.append(iconEl(icon('rain')), 'Rain');
-    return h('div.hud-time.glass', {}, [dial, h('div', {}, [this.dayEl, clock]), this.statsEl, this.aiChip]);
+    const dayProg = h('div.dayprog', { title: 'How far through the day' }, [this.dayBar]);
+    return h('div.hud-time.glass', {}, [dial, h('div', {}, [this.dayEl, clock, dayProg]), this.statsEl, this.aiChip]);
   }
 
   private buildControls(): HTMLElement {
     const speed = h('div.speed.glass');
     const defs: Array<[Speed, string, string]> = SPEEDS.map((s) => [s, s === 0 ? 'pause' : `${String(s).replace('0.', '.')}×`, s === 0 ? 'Pause (Space)' : `World speed ${s}×`] as [Speed, string, string]);
     for (const [s, label, title] of defs) {
-      const b = h('button', { title, onclick: () => this.game.setSpeed(s) }) as HTMLButtonElement;
+      const b = h(s >= 100 ? 'button.turbo-btn' : 'button', { title: s >= 100 ? 'Time-lapse: 1000× (as fast as this computer can run the world)' : title, onclick: () => this.game.setSpeed(s) }) as HTMLButtonElement;
       if (label === 'pause') b.append(iconEl(icon('pause')));
-      else b.textContent = label;
+      else b.textContent = s >= 100 ? '⏩ 1000×' : label;
       speed.append(b);
       this.speedBtns.set(s, b);
     }
@@ -380,7 +384,7 @@ export class UI {
       item.classList.add('fade');
       setTimeout(() => item.remove(), 900);
     }, life);
-    if (e.importance === 3) this.showToast(e.text, e.icon);
+    if (e.importance === 3 && !this.game.turbo) this.showToast(e.text, e.icon);
   }
 
   flash(strength: number): void {
@@ -511,6 +515,8 @@ export class UI {
   private renderTime(): void {
     const w = this.game.world;
     setText(this.dayEl, `Day ${w.worldDay}`);
+    this.dayBar.style.width = `${((w.worldHour / 24) * 100).toFixed(1)}%`;
+    this.renderTurbo();
     setText(this.clockEl, w.clockString(w.worldTime));
     const night = w.worldHour < 6 || w.worldHour >= 19.5;
     const ic = night ? 'moon' : 'sun';
@@ -537,6 +543,30 @@ export class UI {
     chips.push(`<span class="chip" title="Wood in storage"><span class="icon" style="color:#d49a5c">${icon('wood')}</span>${wood}</span>`);
     setHtml(this.statsEl, chips.join(''));
     this.pausedBadge.classList.toggle('on', this.game.speed === 0);
+  }
+
+  /** The time-lapse banner: how fast the world is really running, and days flying by. */
+  private renderTurbo(): void {
+    const g = this.game;
+    const w = g.world;
+    if (!g.turbo) {
+      this.turboStart = null;
+      this.turboEl.classList.remove('on');
+      return;
+    }
+    const now = performance.now() / 1000;
+    if (!this.turboStart) this.turboStart = { day: w.worldTime / 480, t: now };
+    const days = w.worldTime / 480 - this.turboStart.day;
+    const mins = Math.max(1 / 60, (now - this.turboStart.t) / 60);
+    const perMin = days / mins;
+    const actual = Math.round(g.actualSpeed);
+    const frac = (w.worldHour / 24) * 100;
+    const pop = w.living.length;
+    this.turboEl.classList.add('on');
+    setHtml(
+      this.turboEl,
+      `<div class="tl-top"><b>⏩ Time-lapse</b><span>Day ${w.worldDay}</span><span class="tl-pop">${pop} living</span><span class="tl-rate" title="1000× is the target; this is what this computer manages">${actual}× real time · ${perMin >= 10 ? Math.round(perMin) : perMin.toFixed(1)} days/min</span></div><div class="tl-bar"><i style="width:${frac.toFixed(1)}%"></i></div>`,
+    );
   }
 
   private renderSpeed(): void {

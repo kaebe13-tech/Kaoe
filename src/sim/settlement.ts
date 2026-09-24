@@ -151,6 +151,25 @@ export function eraOf(w: World, sid: number): Era {
   return 'Camp';
 }
 
+/** How far a settlement is along the road to its next era (0..1) and what it still needs. */
+export function eraProgress(w: World, sid: number): { era: Era; next: Era | null; frac: number; need: string } {
+  const era = eraOf(w, sid);
+  const done = (k: StructureKind) => w.structures.some((s) => s.settlementId === sid && s.complete && s.kind === k);
+  const homes = w.structures.filter((s) => s.settlementId === sid && s.complete && (s.kind === 'hut' || s.kind === 'house')).length;
+  if (era === 'Camp') {
+    const store = done('storage');
+    const frac = Math.min(homes, 2) / 2 * 0.67 + (store ? 0.33 : 0);
+    const need = [homes < 2 ? `${2 - homes} more home${2 - homes === 1 ? '' : 's'}` : '', store ? '' : 'a storehouse'].filter(Boolean).join(' and ');
+    return { era, next: 'Village', frac, need };
+  }
+  if (era === 'Village') {
+    const frac = Math.min(1, (done('workshop') ? 0.3 : 0) + (done('house') ? 0.2 : 0) + (Math.min(homes, 5) / 5) * 0.5);
+    const need = [done('workshop') ? '' : 'a workshop', done('house') ? '' : 'a house', homes < 5 ? `${5 - homes} more homes` : ''].filter(Boolean).join(', ');
+    return { era, next: 'Town', frac, need: need ? `${need} (or a great hall)` : 'a great hall' };
+  }
+  return { era, next: null, frac: 1, need: '' };
+}
+
 export interface Project {
   kind: StructureKind;
   reason: string;

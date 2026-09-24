@@ -189,7 +189,10 @@ export class App {
 
   private bindSfx(): void {
     this.unsubSfx?.();
-    this.unsubSfx = this.game.world.events.on('sfx', (e) => this.audio.play(e));
+    // In time-lapse the world would be a wall of noise: stay quiet.
+    this.unsubSfx = this.game.world.events.on('sfx', (e) => {
+      if (!this.game.turbo) this.audio.play(e);
+    });
   }
 
   private tick(dt: number): void {

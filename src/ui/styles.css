@@ -452,3 +452,33 @@ body.convo-open .feed { opacity: 0; pointer-events: none; }
   .prow .power { width: 54px; }
   .prow .power .plabel { display: none; }
 }
+
+/* ---------------------------------------------------------------- Time-lapse + progress bars */
+.speed button.turbo-btn { color: #ffb86b; font-weight: 700; }
+.speed button.turbo-btn.on { background: linear-gradient(180deg, #ffcf7a, #ff8a3d); color: #2a1406; box-shadow: 0 0 14px rgba(255, 138, 61, .55); }
+.dayprog { height: 4px; border-radius: 3px; background: rgba(255,255,255,.1); margin-top: 5px; overflow: hidden; width: 100%; min-width: 90px; }
+.dayprog i { display: block; height: 100%; background: linear-gradient(90deg, #ffd66b, #ff9a45); border-radius: 3px; transition: width .2s linear; }
+.turbo { position: absolute; top: 120px; left: 50%; transform: translate(-50%, -8px); width: min(460px, calc(100vw - 32px)); padding: 9px 14px 11px; opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s; z-index: 5; border-color: rgba(255, 138, 61, .45); }
+.turbo.on { opacity: 1; transform: translate(-50%, 0); }
+.tl-top { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); }
+.tl-top b { font: 600 15px var(--font-display); color: #ffb86b; }
+.tl-top span:nth-child(2) { color: var(--text); font-weight: 800; }
+.tl-rate { margin-left: auto; font-variant-numeric: tabular-nums; }
+.tl-bar { margin-top: 7px; height: 8px; border-radius: 5px; background: rgba(255,255,255,.1); overflow: hidden; }
+.tl-bar i { display: block; height: 100%; background: linear-gradient(90deg, #ffd66b, #ff8a3d); border-radius: 5px; }
+body.civ-open .turbo { left: calc(50% + 150px); }
+.cchip { position: relative; overflow: hidden; }
+.cprog { position: absolute; left: 10px; right: 10px; bottom: 3px; height: 3px; border-radius: 2px; background: rgba(255,255,255,.14); overflow: hidden; }
+.cprog i { display: block; height: 100%; background: var(--c); border-radius: 2px; }
+.civpanel .progress { display: flex; flex-direction: column; gap: 7px; margin-top: 6px; }
+.civpanel .pb .pbt { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
+.civpanel .pb .pbt span:first-child { font-weight: 800; }
+.civpanel .pb .pbt span:last-child { color: var(--muted); text-align: right; font-size: 11.5px; }
+.civpanel .pb i { display: block; height: 7px; margin-top: 3px; border-radius: 4px; background: rgba(255,255,255,.1); overflow: hidden; }
+.civpanel .pb b { display: block; height: 100%; border-radius: 4px; transition: width .4s; }
+.sitelbl { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 4px 8px 5px; border-radius: 9px; background: rgba(20,26,32,.8); white-space: nowrap; pointer-events: none; }
+.sitelbl span { font-size: 11px; font-weight: 800; color: var(--text); }
+.sitelbl i { display: block; width: 64px; height: 5px; border-radius: 3px; background: rgba(255,255,255,.14); overflow: hidden; }
+.sitelbl b { display: block; height: 100%; background: linear-gradient(90deg, #f5c451, #d49a5c); border-radius: 3px; transition: width .3s; }
+.sitelbl.far { transform-origin: center bottom; opacity: .8; }
+.sitelbl.far span { font-size: 10px; }
