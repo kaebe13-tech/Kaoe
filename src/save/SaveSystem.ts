@@ -32,6 +32,9 @@ interface AgentSave {
   stats: AgentStats;
   log: DecisionEntry[];
   thought: string;
+  faith?: number;
+  parents?: number[];
+  bornAt?: number;
   memory: { resources: ResourceMemory[]; water: WaterMemory[]; explored: string };
 }
 
@@ -113,6 +116,9 @@ export function serialize(w: World): SaveFile {
       stats: { ...a.stats },
       log: a.log.slice(-24),
       thought: a.thought,
+      faith: a.faith,
+      parents: [...a.parents],
+      bornAt: a.bornAt,
       memory: {
         resources: [...a.memory.resources.values()].map((m) => ({ ...m })),
         water: [...a.memory.water.values()].map((m) => ({ ...m })),
@@ -165,6 +171,9 @@ export function deserialize(data: SaveFile): World {
     Object.assign(a.stats, as.stats);
     a.log = as.log;
     a.thought = as.thought;
+    a.faith = as.faith ?? 0;
+    a.parents = as.parents ?? [];
+    a.bornAt = as.bornAt ?? 0;
     for (const m of as.memory.resources) a.memory.resources.set(m.id, m);
     for (const m of as.memory.water) a.memory.water.set(m.pondId, m);
     const explored = new Float32Array(a.memory.explored.length);

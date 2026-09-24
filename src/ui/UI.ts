@@ -86,6 +86,8 @@ export class UI {
     game.renderer.domElement.addEventListener('pointerleave', () => this.tooltip.classList.remove('on'));
     this.renderSpeed();
     this.renderTools();
+    // The controls card steps aside once the player has had time to read it.
+    window.setTimeout(() => this.help.classList.add('hidden'), 75000);
   }
 
   private bindWorld(): void {
@@ -124,7 +126,9 @@ export class UI {
     }
     const menu = h('button.iconbtn.glass', { title: 'Menu (Esc)', onclick: () => this.openMenu() });
     menu.append(iconEl(icon('menu')));
-    return h('div.hud-controls', {}, [speed, menu]);
+    const help = h('button.iconbtn.glass', { title: 'Controls (H)', onclick: () => this.help.classList.toggle('hidden') });
+    help.append(iconEl(icon('keyboard')));
+    return h('div.hud-controls', {}, [speed, help, menu]);
   }
 
   private buildPowers(): HTMLElement {
@@ -245,7 +249,7 @@ export class UI {
     });
     item.innerHTML = `<span class="icon" style="color:${col}">${icon(e.icon)}</span><span>${escapeHtml(e.text)}</span><span class="tm">${w.clockString(e.time)}</span>`;
     this.feed.append(item);
-    while (this.feed.children.length > 6) this.feed.firstElementChild?.remove();
+    while (this.feed.children.length > 4) this.feed.firstElementChild?.remove();
     const life = e.importance === 3 ? 22000 : e.importance === 2 ? 16000 : 10000;
     setTimeout(() => {
       item.classList.add('fade');

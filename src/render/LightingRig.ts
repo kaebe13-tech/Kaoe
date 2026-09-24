@@ -26,8 +26,8 @@ const KEYS: LookKey[] = [
   { hour: 0, zenith: 0x08112b, horizon: 0x1a2748, sun: 0x9fb6ff, sunI: 0.42, hemiSky: 0x4a5f9a, hemiGround: 0x1d2030, hemiI: 0.62, fog: 0x17223f },
   { hour: 4.5, zenith: 0x0d1838, horizon: 0x2a3560, sun: 0x9fb6ff, sunI: 0.35, hemiSky: 0x4a5f9a, hemiGround: 0x1d2030, hemiI: 0.6, fog: 0x1f2b4c },
   { hour: 5.6, zenith: 0x2a3f7a, horizon: 0xc48a8a, sun: 0xff9f6a, sunI: 0.35, hemiSky: 0x7a86b8, hemiGround: 0x3a3238, hemiI: 0.7, fog: 0x8a7a8e },
-  { hour: 6.6, zenith: 0x4f86c6, horizon: 0xffc08a, sun: 0xffb27a, sunI: 1.35, hemiSky: 0xa9c4e0, hemiGround: 0x6a5a48, hemiI: 1.0, fog: 0xe8c9a8 },
-  { hour: 8.5, zenith: 0x4a98de, horizon: 0xcfe7f4, sun: 0xfff0d8, sunI: 2.35, hemiSky: 0xbfdcf2, hemiGround: 0x6f7a4a, hemiI: 1.2, fog: 0xc5e0ee },
+  { hour: 6.4, zenith: 0x4f86c6, horizon: 0xffc08a, sun: 0xffb27a, sunI: 1.4, hemiSky: 0xa9c4e0, hemiGround: 0x6a5a48, hemiI: 1.0, fog: 0xe8c9a8 },
+  { hour: 7.6, zenith: 0x4a98de, horizon: 0xd9ecf2, sun: 0xfff0d8, sunI: 2.35, hemiSky: 0xc4e0f5, hemiGround: 0x7a8450, hemiI: 1.38, fog: 0xc9e2ee },
   { hour: 12.5, zenith: 0x3c8fe2, horizon: 0xc9e6f6, sun: 0xfffaf0, sunI: 2.6, hemiSky: 0xc4e0f5, hemiGround: 0x74804c, hemiI: 1.25, fog: 0xc2e0f0 },
   { hour: 16.5, zenith: 0x4a8cd6, horizon: 0xf0dfc0, sun: 0xffe6b8, sunI: 2.3, hemiSky: 0xc0d6ea, hemiGround: 0x7a784a, hemiI: 1.15, fog: 0xe6dcc4 },
   { hour: 18.4, zenith: 0x5a6aab, horizon: 0xff9d5c, sun: 0xff8f4f, sunI: 1.55, hemiSky: 0xb0a0c0, hemiGround: 0x6a4a3a, hemiI: 0.95, fog: 0xe8a07a },
@@ -81,7 +81,7 @@ export function sunDirection(hour: number, out: Vector3): Vector3 {
 export class LightingRig {
   readonly sun = new DirectionalLight(0xffffff, 2.5);
   readonly hemi = new HemisphereLight(0xc4e0f5, 0x74804c, 1.2);
-  readonly ambient = new AmbientLight(0xffffff, 0.12);
+  readonly ambient = new AmbientLight(0xffffff, 0.16);
   readonly fog: Fog;
   readonly look: DayLook;
   private readonly target = new Object3D();

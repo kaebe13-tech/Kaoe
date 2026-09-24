@@ -387,6 +387,8 @@ const sleep: GoalFn = (a, w, ctx) => {
   const lateness = h >= 21 || h < 5 ? 1 : h >= 20 ? h - 20 : 0;
   if (lateness > 0) u += (0.62 + (a.has('sleepy') ? 0.1 : 0)) * lateness * (1 - smoothstep(0.93, 1.0, e));
   if (a.has('sleepy')) u *= 1.1;
+  // Eat and drink before bed rather than waking up starving (unless about to drop).
+  if (e > 0.15 && (a.needs.hunger < 0.42 || a.needs.thirst < 0.42)) u *= 0.62;
   if (u < 0.03) return null;
   const reason = e < 0.3 ? `Exhausted (energy ${pct(e)})` : lateness > 0 ? `It's late (${w.clockString()}) — time to rest` : `Tired (energy ${pct(e)})`;
   const home = w.structure(a.homeId);
@@ -870,7 +872,7 @@ const construct: GoalFn = (a, w, ctx) => {
   if (!a.awake || a.needs.energy < 0.15) return null;
   let best: Candidate | null = null;
   for (const s of sitesOf(w)) {
-    if (s.burning > 0 || allowedProgress(s) <= s.progress + 0.015) continue;
+    if (s.burning > 0 || allowedProgress(s) <= s.progress + 1e-4) continue;
     const name = BLUEPRINTS[s.kind].name.toLowerCase();
     const d = dist(a, s);
     const helpers = w.agents.filter((o) => o !== a && o.brain.active?.goal === 'construct' && o.brain.active.targetId === s.id).length;

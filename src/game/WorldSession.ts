@@ -9,6 +9,7 @@ import { HumanView } from '../render/HumanView';
 import { CloudView } from '../render/CloudView';
 import { EffectsView } from '../render/EffectsView';
 import { SelectionView } from '../render/SelectionView';
+import { BirdView } from '../render/BirdView';
 import { WORLD_SIZE } from '../world/config';
 
 /**
@@ -26,6 +27,7 @@ export class WorldSession {
   readonly clouds: CloudView;
   readonly effects: EffectsView;
   readonly selection: SelectionView;
+  readonly birds: BirdView;
   readonly wearTex: DataTexture;
   private wearTimer = 0;
   private readonly unsubs: Array<() => void> = [];
@@ -46,7 +48,8 @@ export class WorldSession {
     this.clouds = new CloudView(world.seed);
     this.effects = new EffectsView(world, world.terrain, this.vegetation, camera);
     this.selection = new SelectionView(world.terrain);
-    this.root.add(this.terrainView.mesh, this.water.group, this.vegetation.group, this.structures.group, this.humans.group, this.clouds.group, this.effects.group, this.selection.group);
+    this.birds = new BirdView(world.seed);
+    this.root.add(this.terrainView.mesh, this.water.group, this.vegetation.group, this.structures.group, this.humans.group, this.clouds.group, this.effects.group, this.selection.group, this.birds.group);
     this.root.name = 'world-session';
     scene.add(this.root);
 

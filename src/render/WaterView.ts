@@ -46,6 +46,7 @@ uniform vec3 uSkyZenith;
 uniform vec3 uSunDir;
 uniform vec3 uSunColor;
 uniform vec3 uAmbient;
+uniform vec3 uPond; // x, z, radius (radius 0 = ocean)
 varying vec3 vWorld;
 
 float wHash(vec2 p){ return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5453); }
@@ -119,6 +120,7 @@ void main() {
   float alpha = mix(0.38, 0.94, smoothstep(0.0, 2.6, depth));
   alpha = max(alpha, foam * 0.95);
   alpha *= smoothstep(-0.02, 0.06, depth);
+  if (uPond.z > 0.0) alpha *= 1.0 - smoothstep(uPond.z * 1.25, uPond.z * 1.5, length(vWorld.xz - uPond.xy));
   gl_FragColor = vec4(col, alpha);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -162,7 +164,7 @@ export class WaterView {
       uFoam: { value: new Color(PAL.foam) },
     };
     this.shared = shared;
-    const make = (level: number, calm: number, shallow: number, mid: number, deep: number): ShaderMaterial => {
+    const make = (level: number, calm: number, shallow: number, mid: number, deep: number, pond = new Vector3(0, 0, 0)): ShaderMaterial => {
       const uniforms: Record<string, IUniform> = UniformsUtils.merge([UniformsLib.fog]);
       Object.assign(uniforms, shared, {
         uLevel: { value: level },
@@ -170,6 +172,7 @@ export class WaterView {
         uShallow: { value: new Color(shallow) },
         uMid: { value: new Color(mid) },
         uDeep: { value: new Color(deep) },
+        uPond: { value: pond },
       });
       return new ShaderMaterial({
         uniforms,
@@ -191,7 +194,7 @@ export class WaterView {
     for (const p of terrain.ponds) {
       const g = new CircleGeometry(p.radius * 1.6, 48);
       g.rotateX(-Math.PI / 2);
-      const mesh = new Mesh(g, make(p.level, 1, PAL.pondShallow, 0x3f9c9a, PAL.pondDeep));
+      const mesh = new Mesh(g, make(p.level, 1, PAL.pondShallow, 0x3f9c9a, PAL.pondDeep, new Vector3(p.x, p.z, p.radius)));
       mesh.position.set(p.x, p.level, p.z);
       mesh.renderOrder = 1;
       mesh.name = `pond-${p.id}`;

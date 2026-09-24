@@ -35,6 +35,7 @@ export class EffectsView {
   private readonly scorchMeshes = new Map<number, Mesh>();
   private readonly scorchGeo: PlaneGeometry;
   private emitAcc = 0;
+  private readonly lastStep = new Map<number, number>();
   private readonly unsubs: Array<() => void> = [];
   /** Called on lightning so the UI can flash and the camera can shake. */
   onFlash: ((strength: number) => void) | null = null;
@@ -261,6 +262,20 @@ export class EffectsView {
       l.position.set(b.x, b.y + 0.8, b.z);
       l.intensity = (18 + Math.sin(time * 13 + i) * 4) * (0.4 + darkness);
     });
+
+    // Little dust kicks from running feet (only near the camera).
+    if (simDt > 0) {
+      for (const a of w.agents) {
+        if (!a.alive || a.anim !== 'run' || a.inside !== null) continue;
+        if (Math.abs(a.x - focus.x) > 40 || Math.abs(a.z - focus.z) > 40) continue;
+        const step = Math.floor(a.walkPhase / Math.PI);
+        if (step === this.lastStep.get(a.id)) continue;
+        this.lastStep.set(a.id, step);
+        const gy = this.ground(a.x, a.z);
+        if (gy < 0.3) continue;
+        this.soft.spawn({ x: a.x, y: gy + 0.08, z: a.z, vx: (R() - 0.5) * 0.4, vy: 0.3, vz: (R() - 0.5) * 0.4, life: 0.6, size: 0.18, grow: 2, r: 0.85, g: 0.78, b: 0.62, a: 0.35, drag: 2 });
+      }
+    }
 
     // Fireflies drift over meadows near the camera at night.
     if (darkness > 0.6 && R() < dt * 25) {

@@ -16,13 +16,14 @@ import type { FeedEvent, FeedIcon, SimEvents } from './events';
 import { BLUEPRINTS } from './blueprints';
 import { emptyInventory, type DangerZone, type DrinkSpot, type ResourceNode, type ScorchMark, type Structure, type StructureKind, type WaterBody } from './types';
 
-export const START_HOUR = 7;
+export const START_HOUR = 7.75;
 
 export interface TribeStats {
   births: number;
   deaths: number;
   built: number;
   lightningStrikes: number;
+  friendships: number;
 }
 
 /** All simulation state. Pure data + helpers; systems live in their own modules. */
@@ -57,7 +58,7 @@ export class World {
   readonly feed: FeedEvent[] = [];
   /** Recent navigation trouble spots, for debugging and the soak test. */
   readonly stuckLog: Array<{ id: number; x: number; z: number; wx: number; wz: number; time: number; final: boolean }> = [];
-  readonly stats: TribeStats = { births: 0, deaths: 0, built: 0, lightningStrikes: 0 };
+  readonly stats: TribeStats = { births: 0, deaths: 0, built: 0, lightningStrikes: 0, friendships: 0 };
   /** Walkable spots along the sea shore (for strolls and watching the waves). */
   readonly beachSpots: V2[] = [];
   /** Which coarse exploration cells are land (to measure how much has been explored). */

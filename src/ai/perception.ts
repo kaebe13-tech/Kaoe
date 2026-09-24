@@ -1,7 +1,7 @@
 import type { Agent } from '../agents/Agent';
 import type { World } from '../sim/World';
 import { resourceLabel } from '../sim/types';
-import { describePlace } from './describe';
+import { describePlace, withArticle } from './describe';
 
 /** What an agent notices around itself; updates its memory. Called once per think. */
 export function perceive(a: Agent, w: World): void {
@@ -15,7 +15,7 @@ export function perceive(a: Agent, w: World): void {
     if (known && known.avoidUntil > time && amount > 0) known.avoidUntil = 0;
     if (isNew && amount > 0) {
       a.stats.discoveries++;
-      a.addLog(time, 'learn', `Found a ${resourceLabel(r).toLowerCase()} ${describePlace(w, r.x, r.z)}.`);
+      a.addLog(time, 'learn', `Found ${withArticle(resourceLabel(r).toLowerCase())} ${describePlace(w, r.x, r.z)}.`);
       if (r.kind === 'fruitTree' && !tribeKnows(w, a, r.id) && w.time > w.startTime + 5) {
         w.log(`${a.name} discovered a fruit tree ${describePlace(w, r.x, r.z)}.`, 'food', 2, r, a.id);
       }

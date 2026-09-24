@@ -3,6 +3,7 @@ import { updateLocomotion } from '../ai/locomotion';
 import { HOUR } from '../world/config';
 import { Ecology } from './ecology';
 import { Families } from './family';
+import { stormLightning } from './hazards';
 import { updateNeeds } from './needs';
 import { World } from './World';
 
@@ -16,13 +17,19 @@ export class Simulation {
 
   constructor(readonly world: World) {}
 
+  /** Milliseconds spent per phase in the last step (debug/profiling). */
+  readonly phase = { paths: 0, agents: 0, ecology: 0, families: 0 };
+
   step(dt: number): void {
     const t0 = performance.now();
     const w = this.world;
     w.time += dt;
     const shower = w.weather.update(dt, w.time);
-    if (shower) w.log('Dark clouds roll in over the island. Rain is coming.', 'rain', 2, shower);
+    if (shower) w.log(shower.peak > 0.75 ? 'A storm is rolling in over the island!' : 'Dark clouds roll in over the island. Rain is coming.', 'rain', 2, shower);
+    stormLightning(w, dt);
     w.paths.step();
+    const t1 = performance.now();
+    this.phase.paths = t1 - t0;
     for (const a of w.agents) {
       a.prevX = a.x;
       a.prevZ = a.z;
@@ -41,8 +48,13 @@ export class Simulation {
       updateLocomotion(a, w, dt);
       a.animTime += dt;
     }
+    const t2 = performance.now();
+    this.phase.agents = t2 - t1;
     this.ecology.update(w, dt);
+    const t3 = performance.now();
+    this.phase.ecology = t3 - t2;
     this.families.update(w, dt);
+    this.phase.families = performance.now() - t3;
     this.stepCount++;
     this.lastStepMs = performance.now() - t0;
   }

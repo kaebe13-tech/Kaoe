@@ -21,7 +21,7 @@ import {
 import { Action, type ActionStatus } from './Action';
 import { fulfilPromise, injectPlan, type Candidate } from './brainCore';
 import { navigateTo, remainingDistance, stopNav } from './locomotion';
-import { describePlace, plural } from './describe';
+import { describePlace, plural, withArticle } from './describe';
 
 // ---------------------------------------------------------------------------
 // Movement
@@ -193,7 +193,7 @@ export class Harvest extends Action {
         w.setResourceState(r, 'stump');
         w.events.emit('treeFelled', { resource: r, dirX: dx / d, dirZ: dz / d });
         w.events.emit('sfx', { kind: 'treeFall', x: r.x, z: r.z });
-        a.addLog(w.time, 'event', `Felled a ${resourceLabel({ ...r, state: 'grown' }).toLowerCase()}.`);
+        a.addLog(w.time, 'event', `Felled ${withArticle(resourceLabel({ ...r, state: 'grown' }).toLowerCase())}.`);
       }
       if (this.count >= this.max || r.amount <= 0) return this.done(a);
     }
@@ -349,7 +349,7 @@ export class Sleep extends Action {
     const h = w.hour;
     const daytime = h >= 6 && h < 20;
     if (this.collapse && a.needs.energy > 0.45) return this.wake(a, w);
-    if (a.needs.energy >= 0.995 && h >= 5) return this.wake(a, w);
+    if (a.needs.energy >= 0.995 && h >= 5.8) return this.wake(a, w);
     if (daytime && a.needs.energy >= (a.has('sleepy') ? 0.85 : 0.72) && this.slept > HOUR * 0.5) return this.wake(a, w);
     return 'running';
   }
@@ -936,9 +936,13 @@ function finishConversation(w: World, a: Agent, b: Agent): void {
   if (told[0]) b.addLog(w.time, 'learn', `${a.name} told me about ${told[0]}.`);
   if (told[1]) a.addLog(w.time, 'learn', `${b.name} told me about ${told[1]}.`);
   if (a.affinity(b.id) > 0.75 && b.affinity(a.id) > 0.75 && !a.relations.has(-b.id)) {
-    a.relations.set(-b.id, 1); // marker: friendship announced
-    w.log(`${a.name} and ${b.name} have become close friends.`, 'social', 2, a, a.id);
+    a.relations.set(-b.id, 1); // marker: friendship noted
+    b.relations.set(-a.id, 1);
+    a.addLog(w.time, 'event', `${b.name} and I have become close friends.`);
+    b.addLog(w.time, 'event', `${a.name} and I have become close friends.`);
     w.events.emit('fx', { kind: 'hearts', x: (a.x + b.x) / 2, z: (a.z + b.z) / 2, y: 1.6 });
+    // Only the first few friendships make the news; after that it's everyday life.
+    if (w.stats.friendships++ < 4) w.log(`${a.name} and ${b.name} have become close friends.`, 'social', 1, a, a.id);
   }
 }
 

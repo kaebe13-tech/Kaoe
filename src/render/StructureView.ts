@@ -20,6 +20,7 @@ import { BLUEPRINTS } from '../sim/blueprints';
 import type { Structure } from '../sim/types';
 import { campfirePieces, gardenPieces, gravePieces, hutPieces, logPileGeometry, shrinePieces, stakeRing, storagePieces, type Piece } from './structureGeometry';
 import { prep } from './geometry';
+import { applySeeThrough } from './seeThrough';
 
 interface Entry {
   s: Structure;
@@ -52,6 +53,7 @@ export class StructureView {
 
   constructor(private readonly terrain: Terrain) {
     this.flameGeo.translate(0, 0.37, 0);
+    applySeeThrough(this.mat, 'structure');
   }
 
   has(id: number): boolean {

@@ -39,6 +39,7 @@ let lastDay = world.day;
 const dayReports: string[] = [];
 for (let i = 0; i < steps; i++) {
   sim.step(SIM_DT);
+  if (sim.lastStepMs > 40) console.log(`slow step ${sim.lastStepMs.toFixed(1)}ms at D${world.day} ${world.clockString()} phases ${JSON.stringify(Object.fromEntries(Object.entries(sim.phase).map(([k, v]) => [k, +v.toFixed(1)])))} pop ${world.living.length}`);
   maxStepMs = Math.max(maxStepMs, sim.lastStepMs);
   for (const a of world.agents) {
     if (!a.alive) continue;
@@ -82,6 +83,7 @@ for (const a of world.agents) {
 const ps = world.paths.finder.stats;
 console.log(`\nPaths: ${ps.searches} searches, ${ps.failures} failures, avg ${(world.paths.msTotal / Math.max(1, world.paths.solvedTotal)).toFixed(2)}ms, avg expanded ${(ps.expanded / Math.max(1, ps.searches)).toFixed(0)}`);
 console.log(`NaN positions: ${nanCount}`);
+console.log(`Stats: ${JSON.stringify(world.stats)}`);
 console.log(`Structures: ${world.structures.map((s) => `${BLUEPRINTS[s.kind].name}${s.complete ? '' : `(${Math.round(s.progress * 100)}%)`}`).join(', ')}`);
 console.log('\nFailure reasons:');
 for (const [r, n] of [...failReasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15)) console.log(`  ${n}x ${r}`);

@@ -40,6 +40,7 @@ import {
   stumpGeometry,
 } from './geometry';
 import { windMaterial, windUniforms } from './windMaterial';
+import { applySeeThrough } from './seeThrough';
 import { PAL } from './palette';
 
 const _m = new Matrix4();
@@ -119,6 +120,8 @@ export class VegetationView {
     const leafMat = windMaterial({ amplitude: 0.0045, frequency: 1.1, flatShading: false, key: 'tree' });
     const palmMat = windMaterial({ amplitude: 0.006, frequency: 1.3, key: 'palm' });
     palmMat.side = 2; // DoubleSide for leaf planes
+    applySeeThrough(leafMat, 'tree');
+    applySeeThrough(palmMat, 'palm');
     const geos: BufferGeometry[] = [broadleafTree(11), pineTree(22), palmTree(33)];
     for (let v = 0; v < 3; v++) {
       const mesh = new InstancedMesh(geos[v]!, v === TreeVariant.Palm ? palmMat : leafMat, Math.max(1, counts[v]! + 64));
@@ -141,7 +144,9 @@ export class VegetationView {
 
     const bushes = resources.filter((r) => r.kind === 'berryBush');
     const bushCap = bushes.length + 48;
-    this.bushes = this.makeMesh(bushGeometry(5), windMaterial({ amplitude: 0.02, frequency: 1.4, key: 'bush' }), bushCap, 'bushes');
+    const bushMat = windMaterial({ amplitude: 0.02, frequency: 1.4, key: 'bush' });
+    applySeeThrough(bushMat, 'bush');
+    this.bushes = this.makeMesh(bushGeometry(5), bushMat, bushCap, 'bushes');
     const berryGeo = new IcosahedronGeometry(0.09, 0);
     this.berries = this.makeMesh(berryGeo, new MeshLambertMaterial({ color: PAL.berry, emissive: 0x3a0008, flatShading: true }), bushCap * BERRY_SLOTS.length, 'berries');
     this.berries.castShadow = false;

@@ -42,3 +42,7 @@ export function plural(n: number, one: string, many: string): string {
 export function pct(v: number): string {
   return `${Math.round(Math.max(0, Math.min(1, v)) * 100)}%`;
 }
+
+export function withArticle(noun: string): string {
+  return /^[aeiou]/i.test(noun) ? `an ${noun}` : `a ${noun}`;
+}

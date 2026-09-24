@@ -78,7 +78,7 @@ button { font: inherit; color: inherit; }
 .power-hint b { color: var(--gold-2); font-family: var(--font-display); font-weight: 600; }
 
 /* ---------------------------------------------------------------- Tribe list */
-.tribe { position: absolute; top: 92px; left: 16px; width: 236px; max-height: calc(100vh - 330px); display: flex; flex-direction: column; overflow: hidden; transition: width .25s; }
+.tribe { position: absolute; top: 92px; left: 16px; width: 236px; max-height: calc(100vh - 372px); min-height: 0; display: flex; flex-direction: column; overflow: hidden; transition: width .25s; }
 .tribe-head { display: flex; align-items: center; gap: 8px; padding: 11px 14px 9px; font-family: var(--font-display); font-weight: 600; font-size: 15px; cursor: pointer; }
 .tribe-head .icon { font-size: 17px; color: var(--gold); }
 .tribe-head .count { margin-left: auto; font-size: 13px; color: var(--muted); }
@@ -97,7 +97,7 @@ button { font: inherit; color: inherit; }
 
 /* ---------------------------------------------------------------- Feed */
 .feed { position: absolute; left: 16px; bottom: 18px; width: 340px; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
-.feed-item { pointer-events: auto; display: flex; gap: 9px; align-items: flex-start; padding: 8px 11px; font-size: 13px; line-height: 1.3; cursor: pointer; animation: feedIn .35s cubic-bezier(.2,.9,.3,1.2); transition: opacity .8s, transform .8s; }
+.feed-item { pointer-events: auto; display: flex; gap: 9px; align-items: flex-start; padding: 7px 11px; font-size: 12.5px; line-height: 1.28; cursor: pointer; animation: feedIn .35s cubic-bezier(.2,.9,.3,1.2); transition: opacity .8s, transform .8s; }
 .feed-item .icon { font-size: 16px; margin-top: 1px; flex: none; }
 .feed-item .tm { color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; margin-left: auto; padding-left: 8px; flex: none; margin-top: 2px; }
 .feed-item.i3 { border-color: rgba(245, 196, 81, .35); }

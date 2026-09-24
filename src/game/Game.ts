@@ -16,6 +16,7 @@ import { CameraController } from '../input/CameraController';
 import { raycastTerrain, screenRay } from '../input/picking';
 import { WorldSession } from './WorldSession';
 import { Emitter } from '../core/events';
+import { seeThroughUniforms } from '../render/seeThrough';
 
 export type Speed = 0 | 1 | 2 | 4;
 export type Tool = 'select' | 'lightning' | 'rain' | 'bless' | 'heal';
@@ -104,9 +105,9 @@ export class Game {
   private frameStart(): void {
     const w = this.world;
     this.controls.follow = null;
-    this.controls.jumpTo(w.start.x, w.start.z, 34);
+    this.controls.jumpTo(w.start.x, w.start.z, 25);
     this.controls.yaw = Math.atan2(w.start.x, w.start.z) + 0.5;
-    this.controls.pitch = 0.62;
+    this.controls.pitch = 0.58;
     this.controls.snap();
   }
 
@@ -272,10 +273,14 @@ export class Game {
     this.simMsFrame = performance.now() - t0;
     const alpha = this.speed > 0 ? this.acc / SIM_DT : 1;
 
-    // Hover feedback.
+    // Hover feedback (throttled: picking projects every human).
     if (this.mouse.inside && this.tool === 'select') {
-      this.hoveredId = this.pickHuman(this.mouse.x, this.mouse.y);
+      if (this.frameCount % 3 === 0) this.hoveredId = this.pickHuman(this.mouse.x, this.mouse.y);
     } else this.hoveredId = null;
+    if (this.tool === 'select') {
+      const want = this.hoveredId !== null ? 'pointer' : '';
+      if (this.renderer.domElement.style.cursor !== want) this.renderer.domElement.style.cursor = want;
+    }
 
     this.controls.update(realDt);
     this.renderWorld(alpha, realDt);
@@ -303,12 +308,20 @@ export class Game {
     this.sky.mesh.position.copy(this.camera.position);
     (this.scene.background as Color).copy(look.horizon);
 
+    // Cut away foliage between the camera and whoever we're looking at.
+    const followed = this.controls.follow ? this.controls.follow() : null;
+    const focusPt = seeThroughUniforms.uFocus.value;
+    if (followed) focusPt.set(followed.x, followed.y + 0.8, followed.z);
+    else focusPt.copy(this.controls.focus).setY(this.controls.focus.y + 0.5);
+    seeThroughUniforms.uCutRadius.value = followed ? 1.9 : 1.2;
+    seeThroughUniforms.uNearFade.value = 3.2;
     s.terrainView.uniforms.uTime.value = this.realTime;
     s.terrainView.uniforms.uWet.value += (rainHere - s.terrainView.uniforms.uWet.value) * Math.min(1, dt * 0.5);
     const amb = look.hemiSky.clone().multiplyScalar(look.hemiIntensity * 0.55);
     s.water.setLook({ skyHorizon: look.horizon, skyZenith: look.zenith, sunDir: look.lightDir, sunColor: look.sunColor.clone().multiplyScalar(look.sunIntensity / 2.5), ambient: amb });
     s.vegetation.update(dt, this.realTime);
     s.clouds.update(dt, look.sunColor, look.darkness, overcast);
+    s.birds.update(this.realTime, look.darkness);
     s.structures.animate(this.realTime, look.darkness, (id) => w.agents.filter((a) => a.inside === id && a.alive).length);
     s.humans.update(w.agents, alpha, dt, this.speed === 0);
     s.effects.update(dt, this.speed > 0 ? dt * this.speed * this.debugSpeed : 0, this.realTime, this.controls.focus, this.controls.currentDistance, look.darkness);

@@ -27,6 +27,8 @@ function jitter(a: Agent, c: Candidate, now: number): number {
 }
 
 export function think(a: Agent, w: World): void {
+  // Forget expired cooldowns now and then so the map never grows without bound.
+  if (a.brain.cooldowns.size > 64) for (const [k, t] of a.brain.cooldowns) if (t <= w.time) a.brain.cooldowns.delete(k);
   perceive(a, w);
   const ctx = buildContext(a, w);
   const now = w.time;

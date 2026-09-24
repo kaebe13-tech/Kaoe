@@ -186,7 +186,10 @@ function carvePond(p: Pond, heights: Float32Array, res: number, cell: number, no
         // Gentle shore that rises out of the water, blended back into natural terrain.
         const shore = p.level + 0.12 + (d - rn) * 0.16;
         const w = 1 - smoothstep(rn * 1.15, outer, d);
-        heights[i] = lerp(h, Math.max(shore, Math.min(h, shore + 1.5)), w);
+        let nh = lerp(h, Math.max(shore, Math.min(h, shore + 1.5)), w);
+        // Never let the ground around the pond dip below the water surface (no floating water).
+        if (d < p.radius * 1.75) nh = Math.max(nh, p.level + 0.1 + (d - rn) * 0.05);
+        heights[i] = nh;
       }
     }
   }
