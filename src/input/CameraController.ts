@@ -24,6 +24,8 @@ export class CameraController {
   follow: (() => Vector3 | null) | null = null;
   onFollowBroken: (() => void) | null = null;
   enabled = true;
+  /** Radians per second of slow automatic orbit (title screen). */
+  autoRotate = 0;
   private shakeAmt = 0;
   private readonly raycaster = new Raycaster();
   private readonly plane = new Plane(new Vector3(0, 1, 0), 0);
@@ -178,6 +180,7 @@ export class CameraController {
   }
 
   update(dt: number): void {
+    if (this.autoRotate) this.yaw += this.autoRotate * dt;
     if (this.enabled && !this.isTyping()) {
       const fast = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
       const speed = (fast ? 2.8 : 1) * (12 + this.distance * 0.9);

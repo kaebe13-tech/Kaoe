@@ -82,6 +82,8 @@ export class Game {
     world.spawnTribe(population);
     this.session = new WorldSession(world, this.scene, this.camera);
     this.session.effects.onFlash = (k) => this.onFlash?.(k);
+    // One step so everyone has formed an intention before the first frame.
+    this.session.sim.step(SIM_DT);
     this.controls = new CameraController(this.camera, this.renderer.domElement, world.terrain);
     this.frameStart();
 
@@ -115,6 +117,8 @@ export class Game {
     this.select(null);
     this.session.dispose();
     this.session = new WorldSession(world, this.scene, this.camera);
+    this.session.effects.onFlash = (k) => this.onFlash?.(k);
+    if (world.agents.every((a) => !a.brain.active)) this.session.sim.step(SIM_DT);
     this.controls.terrain = world.terrain;
     this.acc = 0;
     this.frameStart();

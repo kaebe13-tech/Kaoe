@@ -18,9 +18,16 @@ game.start();
 if (params.has('nointro')) {
   game.setSpeed(1);
 } else {
-  // The world idles gently behind the title card; time starts when the player begins.
+  // The world idles gently behind the title card while the camera drifts around the tribe;
+  // time starts when the player begins.
   game.setSpeed(0);
-  showIntro(() => game.setSpeed(1));
+  document.body.classList.add('intro-mode');
+  game.controls.autoRotate = 0.06;
+  showIntro(() => {
+    document.body.classList.remove('intro-mode');
+    game.controls.autoRotate = 0;
+    game.setSpeed(1);
+  });
 }
 
 (window as unknown as Record<string, unknown>).__app = app;

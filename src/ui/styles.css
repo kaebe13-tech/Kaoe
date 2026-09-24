@@ -273,3 +273,7 @@ kbd { font-family: var(--font-body); font-weight: 800; font-size: 11px; padding:
 .chronicle .entry .icon { font-size: 14px; padding-top: 1px; }
 .chronicle .empty { color: var(--dim); font-size: 13px; padding: 10px 0; }
 @media (max-width: 900px) { .minimap { display: none; } }
+
+/* Title screen: keep the HUD out of the way until the player begins. */
+.ui-root > * { transition: opacity .9s ease; }
+.intro-mode .ui-root > *:not(.labels):not(.vignette) { opacity: 0 !important; pointer-events: none !important; }
