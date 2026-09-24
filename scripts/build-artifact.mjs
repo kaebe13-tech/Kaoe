@@ -14,6 +14,8 @@ await build({
   root: process.cwd(),
   base: './',
   logLevel: 'warn',
+  // The artifact has no server: leaders use their local minds and no AI endpoint is called.
+  define: { 'import.meta.env.VITE_KAOE_STATIC': JSON.stringify('1') },
   plugins: [
     {
       // Fonts come from Google Fonts in this build.

@@ -186,6 +186,20 @@ export class WaterView {
   readonly group = new Group();
   private readonly shared: SharedWaterUniforms;
 
+  private makeMat: ((level: number, calm: number, shallow: number, mid: number, deep: number, pond?: Vector3, river?: boolean, magic?: number) => ShaderMaterial) | null = null;
+
+  /** Add the surface of a new lake or spring (made by the god). */
+  addPond(p: { id: number; x: number; z: number; radius: number; level: number; magic?: boolean }): void {
+    if (!this.makeMat || this.group.getObjectByName(`pond-${p.id}`)) return;
+    const g = new CircleGeometry(p.radius * 1.6, 48);
+    g.rotateX(-Math.PI / 2);
+    const mesh = new Mesh(g, this.makeMat(p.level, 1, 0x7fe3d8, 0x3aaeae, 0x2a7f9a, new Vector3(p.x, p.z, p.radius), false, 0.35));
+    mesh.position.set(p.x, p.level, p.z);
+    mesh.renderOrder = 1;
+    mesh.name = `pond-${p.id}`;
+    this.group.add(mesh);
+  }
+
   constructor(terrain: Terrain, tu: TerrainUniforms) {
     const shared = {
       uHeightTex: tu.uHeightTex,
@@ -223,6 +237,7 @@ export class WaterView {
       });
     };
 
+    this.makeMat = make;
     const oceanGeo = new PlaneGeometry(4000, 4000, 1, 1);
     oceanGeo.rotateX(-Math.PI / 2);
     const ocean = new Mesh(oceanGeo, make(0, 0, PAL.waterShallow, PAL.waterMid, PAL.waterDeep));

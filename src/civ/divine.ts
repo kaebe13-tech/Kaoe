@@ -2,7 +2,7 @@ import type { V2 } from '../core/math';
 import type { World } from '../sim/World';
 import type { Agent } from '../agents/Agent';
 import { DAY_LENGTH } from '../world/config';
-import { Civilization, type DivineKind, type GodRequest, type Reputation, type RequestKind } from './Civilization';
+import { Civilization, type DivineKind, type GodPromise, type GodRequest, type Reputation, type RequestKind } from './Civilization';
 import { civHistory, leaderOf, territoryAt } from './civSystem';
 import { leaderMemory, requestLeaderThought, say } from './leader';
 import { campCenter } from '../sim/settlement';
@@ -148,6 +148,9 @@ export function divineEvent(w: World, act: DivineAct): void {
       if (!near) continue;
       resolveRequest(w, civ, req, 'granted');
     }
+    // Did it keep a promise the god made them?
+    const kinds = (Object.keys(REQUEST_ANSWERS) as RequestKind[]).filter((k) => REQUEST_ANSWERS[k].includes(act.kind));
+    if (kinds.length && civ.mind.promises?.some((p) => p.status === 'open')) checkPromises(w, civ, kinds);
     // Helping one people against another sours or warms their feelings for each other.
     if (act.kind === 'peace') for (const [, rel] of civ.relations) if (rel.state !== 'unknown') rel.truceUntil = Math.max(rel.truceUntil, w.worldTime + DAY_LENGTH * 2);
   }
@@ -219,6 +222,7 @@ export function divineUpdate(w: World, dt: number): void {
     r.trust += (0.25 - r.trust) * day * 0.08;
     clampRep(r);
     for (const req of civ.requests) if (req.status === 'open' && req.expires < w.worldTime) resolveRequest(w, civ, req, 'ignored');
+    if (civ.mind.promises?.length) checkPromises(w, civ, null);
     civ.godView = godView(civ);
     // Individual faith follows the people's mood a little.
     for (const a of civ.members) if (a.alive && a.faith < r.faith * 0.8) a.faith += (r.faith * 0.8 - a.faith) * day * 0.5;
@@ -243,4 +247,41 @@ export function godView(civ: Civilization): string {
   if (r.fear > 0.4) return `${name}, whose moods are feared`;
   if (r.faith > 0.35) return `${name}, who watches over them`;
   return 'a distant, silent watcher';
+}
+
+// ---------------------------------------------------------------------------
+// Promises the god makes when speaking
+// ---------------------------------------------------------------------------
+
+export function promisesOf(civ: Civilization): GodPromise[] {
+  if (!civ.mind.promises) civ.mind.promises = [];
+  return civ.mind.promises;
+}
+
+export function openPromises(civ: Civilization): GodPromise[] {
+  return promisesOf(civ).filter((p) => p.status === 'open');
+}
+
+/** Promises the god made: kept when a matching act comes, broken when the time runs out. */
+export function checkPromises(w: World, civ: Civilization, answeredKinds: RequestKind[] | null): void {
+  for (const p of promisesOf(civ)) {
+    if (p.status !== 'open') continue;
+    if (answeredKinds && answeredKinds.includes(p.kind)) {
+      p.status = 'kept';
+      civ.rep.trust = Math.min(1, civ.rep.trust + 0.12);
+      civ.rep.faith = Math.min(1, civ.rep.faith + 0.06);
+      civ.addDivine({ time: w.worldTime, kind: 'answered', text: `The voice kept its promise: "${p.text}"`, valence: 0.9 });
+      civHistory(w, civ, `The god kept a promise: "${p.text}"`, 'divine', 2);
+      leaderMemory(civ, `The voice kept its word: "${p.text}"`, 3);
+      say(w, civ, 'You promised, and you kept your word. We will remember.', 'grateful');
+    } else if (!answeredKinds && p.until < w.worldTime) {
+      p.status = 'broken';
+      civ.rep.trust = Math.max(0, civ.rep.trust - 0.14);
+      civ.rep.anger = Math.min(1, civ.rep.anger + 0.06);
+      civ.addDivine({ time: w.worldTime, kind: 'ignored', text: `The voice broke its promise: "${p.text}"`, valence: -0.6 });
+      civHistory(w, civ, `The god broke a promise: "${p.text}"`, 'divine', 2);
+      leaderMemory(civ, `The voice promised "${p.text}" and nothing came.`, 3);
+      say(w, civ, 'You promised us. Nothing came. Why should we believe you now?', 'bitter');
+    }
+  }
 }

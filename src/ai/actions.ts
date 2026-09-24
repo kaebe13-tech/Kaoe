@@ -1342,6 +1342,43 @@ export class Worship extends Action {
 }
 
 /** The leader stands by the evening fire and speaks to the people. */
+/** Kneel before the god who has come down among them. */
+export class Behold extends Action {
+  private t = 0;
+  constructor(private readonly duration: number) {
+    super();
+  }
+
+  get label(): string {
+    return 'Kneeling before the god';
+  }
+
+  tick(a: Agent, w: World, dt: number): ActionStatus {
+    const p = w.presence;
+    if (!p || p.until < w.worldTime) {
+      this.summary = 'The light faded. I will never forget it.';
+      return 'success';
+    }
+    a.focus = { x: p.x, z: p.z };
+    a.setAnim('pray');
+    this.t += dt;
+    const hr = dt / HOUR;
+    a.faith = Math.min(1, a.faith + hr * 0.6);
+    a.needs.safety = Math.min(1, a.needs.safety + hr * 0.6);
+    a.needs.social = Math.min(1, a.needs.social + hr * 0.2);
+    this.progress = clamp01(this.t / this.duration);
+    if (this.t >= this.duration) {
+      this.summary = 'Knelt before the god who walked among us.';
+      return 'success';
+    }
+    return 'running';
+  }
+
+  override finish(a: Agent): void {
+    if (a.anim === 'pray') a.setAnim('idle');
+  }
+}
+
 export class Address extends Action {
   private t = 0;
   constructor(

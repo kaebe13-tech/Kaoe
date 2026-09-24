@@ -17,6 +17,8 @@ import { raycastTerrain, screenRay } from '../input/picking';
 import { WorldSession } from './WorldSession';
 import { Emitter } from '../core/events';
 import { seeThroughUniforms } from '../render/seeThrough';
+import { TargetRing } from '../render/TargetRing';
+import { territoryAt } from '../civ/civSystem';
 
 export const SPEEDS = [0, 0.25, 0.5, 1, 2, 4, 8, 16] as const;
 export type Speed = (typeof SPEEDS)[number];
@@ -28,6 +30,8 @@ export interface GameEvents {
   tool: Tool;
   session: WorldSession;
   frame: number;
+  /** A civilization's label was clicked in the world. */
+  civClick: number;
 }
 
 const MAX_STEPS_PER_FRAME = 60;
@@ -46,6 +50,14 @@ export class Game {
   readonly lighting = new LightingRig();
   readonly controls: CameraController;
   readonly events = new Emitter<GameEvents>();
+  readonly targetRing = new TargetRing();
+  /** What the chosen power aims at (set by the UI while a power is selected). */
+  targeting: { radius: number; color: string; kind: 'ground' | 'person' | 'body' | 'civ' } | null = null;
+  /** Civilization highlighted from the civ panel (kept while targeting civs). */
+  highlightCiv: number | null = null;
+  /** Point under the cursor on the ground (updated while targeting). */
+  readonly cursorGround = new Vector3();
+  cursorOnGround = false;
   session: WorldSession;
 
   speed: Speed = 1;
@@ -83,13 +95,14 @@ export class Game {
 
     this.camera = new PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.3, 4000);
     this.scene.background = new Color(0x88bbee);
-    this.scene.add(this.sky.mesh, ...this.lighting.objects);
+    this.scene.add(this.sky.mesh, ...this.lighting.objects, this.targetRing.group);
     this.scene.fog = this.lighting.fog;
 
     const world = new World(seed);
     world.spawnCivilizations(civs, population);
     this.session = new WorldSession(world, this.scene, this.camera);
     this.session.effects.onFlash = (k) => this.onFlash?.(k);
+    this.session.effects.onShake = (k, t) => this.controls.shakeFor(k, t);
     // One step so everyone has formed an intention before the first frame.
     this.session.sim.step(SIM_DT);
     this.controls = new CameraController(this.camera, this.renderer.domElement, world.terrain);
@@ -128,6 +141,7 @@ export class Game {
     this.session.dispose();
     this.session = new WorldSession(world, this.scene, this.camera);
     this.session.effects.onFlash = (k) => this.onFlash?.(k);
+    this.session.effects.onShake = (k, t) => this.controls.shakeFor(k, t);
     if (fresh) this.session.sim.step(SIM_DT);
     this.controls.terrain = world.terrain;
     this.acc = 0;
@@ -170,6 +184,32 @@ export class Game {
     return this.controls.follow !== null;
   }
 
+  /** Smooth camera flight to a place (drops any follow). */
+  flyTo(x: number, z: number, distance?: number, pitch?: number): void {
+    this.controls.follow = null;
+    this.controls.flyTo(x, z, distance, pitch);
+  }
+
+  private worldViewReturn: { x: number; z: number; d: number; p: number } | null = null;
+
+  /** Toggle the whole-world overview (and back to where the camera was). */
+  toggleWorldView(): void {
+    const c = this.controls;
+    if (this.worldViewReturn && c.distance > 400) {
+      const r = this.worldViewReturn;
+      this.worldViewReturn = null;
+      c.flyTo(r.x, r.z, r.d, r.p);
+      return;
+    }
+    this.worldViewReturn = { x: c.focus.x, z: c.focus.z, d: c.distance, p: c.pitch };
+    c.follow = null;
+    c.flyTo(0, 30, 690, 1.18);
+  }
+
+  get inWorldView(): boolean {
+    return this.controls.distance > 400;
+  }
+
   /** Nearest visible human to a screen point (generous hit area). */
   pickHuman(clientX: number, clientY: number, radiusPx = 26): number | null {
     const rect = this.renderer.domElement.getBoundingClientRect();
@@ -202,7 +242,7 @@ export class Game {
   onFlash: ((strength: number) => void) | null = null;
 
   /** Hook for god powers; set by the powers module. */
-  onGroundClick: ((p: Vector3, humanId: number | null) => void) | null = null;
+  onGroundClick: ((p: Vector3, humanId: number | null, shift: boolean) => void) | null = null;
 
   /** Force civilization borders visible (toggled from the UI). */
   showBorders = false;
@@ -215,7 +255,7 @@ export class Game {
       return;
     }
     const p = this.pickGround(e.clientX, e.clientY);
-    if (p && this.onGroundClick) this.onGroundClick(p, human);
+    if (p && this.onGroundClick) this.onGroundClick(p, human, e.shiftKey);
   };
 
   private onDoubleClick = (e: MouseEvent) => {
@@ -304,7 +344,8 @@ export class Game {
     const alpha = this.speed > 0 ? this.acc / SIM_DT : 1;
 
     // Hover feedback (throttled: picking projects every human).
-    if (this.mouse.inside && this.tool === 'select') {
+    const wantsPerson = this.tool === 'select' || (this.targeting !== null && (this.targeting.kind === 'person' || this.targeting.kind === 'civ'));
+    if (this.mouse.inside && wantsPerson) {
       if (this.frameCount % 3 === 0) this.hoveredId = this.pickHuman(this.mouse.x, this.mouse.y);
     } else this.hoveredId = null;
     if (this.tool === 'select') {
@@ -313,10 +354,50 @@ export class Game {
     }
 
     this.controls.update(realDt);
+    this.updateTargeting(realDt);
     this.renderWorld(alpha, realDt);
     this.frameMs = performance.now() - t0;
     this.events.emit('frame', realDt);
   };
+
+  /** Ring under the cursor for the chosen power; highlight the people a civ power would touch. */
+  private updateTargeting(dt: number): void {
+    const t = this.targeting;
+    const tv = this.session.terrainView.uniforms.uHighlight;
+    if (!t || !this.mouse.inside || this.tool === 'select') {
+      this.targetRing.hide();
+      this.cursorOnGround = false;
+      tv.value = this.highlightCiv === null ? 0 : this.highlightCiv + 1;
+      return;
+    }
+    const p = this.pickGround(this.mouse.x, this.mouse.y);
+    if (!p) {
+      this.targetRing.hide();
+      this.cursorOnGround = false;
+      return;
+    }
+    this.cursorGround.copy(p);
+    this.cursorOnGround = true;
+    if (t.kind === 'civ') {
+      this.targetRing.hide();
+      let owner = territoryAt(this.world, p.x, p.z);
+      const h = this.hoveredId !== null ? this.world.agent(this.hoveredId) : undefined;
+      if (h) owner = h.civId;
+      tv.value = owner >= 0 ? owner + 1 : 0;
+      return;
+    }
+    tv.value = this.highlightCiv === null ? 0 : this.highlightCiv + 1;
+    let x = p.x;
+    let z = p.z;
+    if (t.kind === 'person' && this.hoveredId !== null) {
+      const hp = this.session.humans.positionOf(this.hoveredId);
+      if (hp) {
+        x = hp.x;
+        z = hp.z;
+      }
+    }
+    this.targetRing.show(this.world.terrain, x, z, t.radius, t.color, this.controls.currentDistance, dt);
+  }
 
   private renderWorld(alpha: number, dt: number): void {
     const s = this.session;

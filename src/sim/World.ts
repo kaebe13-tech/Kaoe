@@ -20,6 +20,9 @@ import type { FeedEvent, FeedIcon, SimEvents } from './events';
 import { BLUEPRINTS } from './blueprints';
 import { emptyInventory, type DangerZone, type DrinkSpot, type ResourceNode, type ScorchMark, type Structure, type StructureKind, type WaterBody } from './types';
 import { daylightAt } from './time';
+import type { TerrainEdit } from './terrainEdit';
+import type { WorldEventRecord } from './worldEvents';
+import type { Pond } from '../world/Terrain';
 
 export const START_HOUR = 7.75;
 
@@ -91,6 +94,15 @@ export class World {
   readonly stats: TribeStats = { births: 0, deaths: 0, built: 0, lightningStrikes: 0, friendships: 0 };
   /** Resource state as generated (index = resource id). */
   readonly generated: { state: Uint8Array; amount: Uint8Array; max: Uint8Array };
+  /** Changes the god made to the land, in order (saved and replayed on load). */
+  readonly terrainEdits: TerrainEdit[] = [];
+  /** Divine acts waiting to land (a meteor falling, a quake building). World times. */
+  readonly scheduled: Array<{ at: number; kind: string; x: number; z: number; r: number; data?: number }> = [];
+  /** Natural world events so far, and when the next one may come. */
+  readonly worldEventLog: WorldEventRecord[] = [];
+  nextWorldEvent = DAY_LENGTH * 1.2;
+  /** The god's visible presence in the world, if manifested (world time it fades). */
+  presence: { x: number; z: number; until: number; since: number } | null = null;
   /** Walkable spots along the sea shore (for strolls and watching the waves). */
   readonly beachSpots: V2[] = [];
   /** Which coarse exploration cells are land (to measure how much has been explored). */
@@ -487,29 +499,37 @@ export class World {
 
   // ---- Water --------------------------------------------------------------
 
-  private buildWater(): void {
-    let spotId = 1;
+  private spotId = 1;
+
+  /** Drinking spots around a lake (also used for springs the god creates). */
+  addPondWater(p: Pond, name?: string): void {
     const t = this.terrain;
-    for (const p of t.ponds) {
-      const spots: DrinkSpot[] = [];
-      for (let k = 0; k < 40; k++) {
-        const a = (k / 40) * TAU;
-        const dx = Math.cos(a);
-        const dz = Math.sin(a);
-        for (let r = p.radius * 0.6; r < p.radius * 2.2; r += 0.3) {
-          const x = p.x + dx * r;
-          const z = p.z + dz * r;
-          if (this.nav.walkable(x, z) && !this.nav.wade[this.nav.index(this.nav.cellX(x), this.nav.cellZ(z))]) {
-            // Only keep spots right at the water's edge.
-            if (t.pondAt(x - dx * 1.4, z - dz * 1.4)) spots.push({ id: spotId++, pondId: p.id, x, z, wx: x - dx * 1.2, wz: z - dz * 1.2 });
-            break;
-          }
+    const spots: DrinkSpot[] = [];
+    for (let k = 0; k < 40; k++) {
+      const a = (k / 40) * TAU;
+      const dx = Math.cos(a);
+      const dz = Math.sin(a);
+      for (let r = p.radius * 0.6; r < p.radius * 2.2; r += 0.3) {
+        const x = p.x + dx * r;
+        const z = p.z + dz * r;
+        if (this.nav.walkable(x, z) && !this.nav.wade[this.nav.index(this.nav.cellX(x), this.nav.cellZ(z))]) {
+          // Only keep spots right at the water's edge.
+          if (t.pondAt(x - dx * 1.4, z - dz * 1.4)) spots.push({ id: this.spotId++, pondId: p.id, x, z, wx: x - dx * 1.2, wz: z - dz * 1.2 });
+          break;
         }
       }
-      const region = t.regionAt(p.x, p.z);
-      const name = p.magic ? 'the Moonwell' : p.radius > 11 ? `the great lake of ${region?.name ?? 'the valley'}` : `a lake in ${region?.name ?? 'the wilds'}`;
-      this.water.push({ id: p.id, kind: p.magic ? 'spring' : 'lake', name, x: p.x, z: p.z, radius: p.radius, level: p.level, spots });
     }
+    const region = t.regionAt(p.x, p.z);
+    const label = name ?? (p.magic ? 'the Moonwell' : p.radius > 11 ? `the great lake of ${region?.name ?? 'the valley'}` : `a lake in ${region?.name ?? 'the wilds'}`);
+    const existing = this.water.findIndex((wb) => wb.id === p.id);
+    const body: WaterBody = { id: p.id, kind: p.magic ? 'spring' : 'lake', name: label, x: p.x, z: p.z, radius: p.radius, level: p.level, spots };
+    if (existing >= 0) this.water[existing] = body;
+    else this.water.push(body);
+  }
+
+  private buildWater(): void {
+    const t = this.terrain;
+    for (const p of t.ponds) this.addPondWater(p);
     // Rivers: split into reaches of ~24 m, each with drinking spots on both banks.
     for (const river of t.rivers) {
       const pts = river.points;
@@ -546,7 +566,7 @@ export class World {
               if (!this.nav.walkable(x, z)) continue;
               if (this.nav.wade[this.nav.index(this.nav.cellX(x), this.nav.cellZ(z))]) continue;
               if (this.terrain.heightAt(x, z) > p.level + 1.4) break;
-              seg.push({ id: spotId++, pondId: -1, x, z, wx: p.x + nx * (p.width * 0.4) * side, wz: p.z + nz * (p.width * 0.4) * side });
+              seg.push({ id: this.spotId++, pondId: -1, x, z, wx: p.x + nx * (p.width * 0.4) * side, wz: p.z + nz * (p.width * 0.4) * side });
               break;
             }
           }

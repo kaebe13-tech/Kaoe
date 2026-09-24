@@ -274,6 +274,17 @@ export class VegetationView {
     this.slots.delete(id);
   }
 
+  /** Ground cover in this rectangle is rebuilt on the next frame (the land changed shape). */
+  invalidateDecor(x0: number, z0: number, x1: number, z1: number): void {
+    for (const [c, list] of this.decorChunks) {
+      const cx = (c % VCHUNK_N) * VCHUNK - WORLD_HALF;
+      const cz = Math.floor(c / VCHUNK_N) * VCHUNK - WORLD_HALF;
+      if (cx > x1 || cx + VCHUNK < x0 || cz > z1 || cz + VCHUNK < z0) continue;
+      for (const e of list) e.layer.release(e.slot);
+      this.decorChunks.delete(c);
+    }
+  }
+
   /** Re-write matrices for a resource whose state changed. */
   sync(r: ResourceNode, shake = 0): void {
     this.write(r, shake);

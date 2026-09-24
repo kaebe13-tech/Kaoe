@@ -30,6 +30,8 @@ export class CameraController {
   /** Radians per second of slow automatic orbit (title screen). */
   autoRotate = 0;
   private shakeAmt = 0;
+  /** A long, eased camera move (world view <-> a village <-> a person). */
+  private flight: { t: number; dur: number; x0: number; z0: number; d0: number; p0: number; y0: number; x1: number; z1: number; d1: number; p1: number; y1: number; hump: number } | null = null;
   private readonly raycaster = new Raycaster();
   private readonly plane = new Plane(new Vector3(0, 1, 0), 0);
 
@@ -63,8 +65,46 @@ export class CameraController {
   }
 
   jumpTo(x: number, z: number, distance?: number): void {
+    this.flight = null;
     this.target.set(x, this.terrain.heightAt(x, z), z);
     if (distance !== undefined) this.distance = distance;
+  }
+
+  /**
+   * Fly smoothly to a place: long trips rise up over the land and come back down, so moving
+   * between the world view, a village and a single person always reads as one continuous shot.
+   */
+  flyTo(x: number, z: number, distance = this.distance, pitch = this.pitch, yaw = this.yaw): void {
+    const c = this.cur;
+    const lim = WORLD_HALF - 5;
+    x = clamp(x, -lim, lim);
+    z = clamp(z, -lim, lim);
+    distance = clamp(distance, 4, MAX_DIST);
+    const travel = Math.hypot(x - c.target.x, z - c.target.z);
+    const zoom = Math.abs(Math.log(distance / Math.max(1, c.distance)));
+    const dur = clamp(0.75 + travel / 380 + zoom * 0.3, 0.75, 2.8);
+    const hump = Math.max(0, travel * 0.5 - Math.max(c.distance, distance) * 0.45);
+    let dy = yaw - c.yaw;
+    dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+    this.flight = { t: 0, dur, x0: c.target.x, z0: c.target.z, d0: c.distance, p0: c.pitch, y0: c.yaw, x1: x, z1: z, d1: distance, p1: pitch, y1: c.yaw + dy, hump };
+    this.target.set(x, this.terrain.heightAt(x, z), z);
+    this.distance = distance;
+    this.pitch = pitch;
+    this.yaw = c.yaw + dy;
+  }
+
+  get flying(): boolean {
+    return this.flight !== null;
+  }
+
+  /** Stop a flight where it is (the player took the controls). */
+  private cancelFlight(): void {
+    if (!this.flight) return;
+    this.flight = null;
+    this.target.copy(this.cur.target);
+    this.distance = this.cur.distance;
+    this.pitch = this.cur.pitch;
+    this.yaw = this.cur.yaw;
   }
 
   snap(): void {
@@ -90,6 +130,7 @@ export class CameraController {
 
   private onDown = (e: PointerEvent) => {
     if (!this.enabled) return;
+    this.cancelFlight();
     this.dragStart.set(e.clientX, e.clientY);
     this.lastMouse.set(e.clientX, e.clientY);
     this.dragDist = 0;
@@ -143,6 +184,7 @@ export class CameraController {
   private onWheel = (e: WheelEvent) => {
     if (!this.enabled) return;
     e.preventDefault();
+    this.cancelFlight();
     const delta = clamp(e.deltaY, -300, 300);
     const factor = Math.pow(1.0018, delta);
     const before = this.distance;
@@ -184,6 +226,11 @@ export class CameraController {
 
   update(dt: number): void {
     if (this.autoRotate) this.yaw += this.autoRotate * dt;
+    if (this.rumble.left > 0) {
+      this.rumble.left -= dt;
+      this.shake(this.rumble.strength * Math.min(1, this.rumble.left / (this.rumble.total * 0.5)));
+      if (this.rumble.left <= 0) this.rumble.strength = 0;
+    }
     if (this.enabled && !this.isTyping()) {
       const fast = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
       const speed = (fast ? 2.8 : 1) * (12 + this.distance * 0.95);
@@ -193,6 +240,7 @@ export class CameraController {
       if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) fz -= 1;
       if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) fx += 1;
       if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) fx -= 1;
+      if (fx || fz || this.keys.has('KeyQ') || this.keys.has('KeyE') || this.keys.has('KeyZ') || this.keys.has('KeyX')) this.cancelFlight();
       if (fx || fz) {
         const fwdX = -Math.sin(this.yaw);
         const fwdZ = -Math.cos(this.yaw);
@@ -212,12 +260,40 @@ export class CameraController {
       if (this.keys.has('Equal') || this.keys.has('NumpadAdd')) this.distance = clamp(this.distance * (1 - dt * 1.5), 4, MAX_DIST);
       if (this.keys.has('Minus') || this.keys.has('NumpadSubtract')) this.distance = clamp(this.distance * (1 + dt * 1.5), 4, MAX_DIST);
     }
-    if (this.follow) {
+    if (this.follow && !this.flight) {
       const p = this.follow();
       if (p) {
         this.target.x = p.x;
         this.target.z = p.z;
       }
+    }
+    if (this.flight) {
+      const f = this.flight;
+      f.t += dt;
+      const u = Math.min(1, f.t / f.dur);
+      const e = u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+      const arc = Math.sin(Math.PI * u);
+      // A followed person keeps moving: aim at where they are now.
+      if (this.follow) {
+        const p = this.follow();
+        if (p) {
+          f.x1 = p.x;
+          f.z1 = p.z;
+        }
+      }
+      const c = this.cur;
+      c.target.x = f.x0 + (f.x1 - f.x0) * e;
+      c.target.z = f.z0 + (f.z1 - f.z0) * e;
+      c.target.y = damp(c.target.y, Math.max(this.terrain.heightAt(c.target.x, c.target.z), 0), 6, dt);
+      c.distance = Math.exp(Math.log(f.d0) + (Math.log(f.d1) - Math.log(f.d0)) * e) + f.hump * arc;
+      c.pitch = f.p0 + (f.p1 - f.p0) * e + (f.hump > 0 ? 0.18 * arc : 0);
+      c.yaw = f.y0 + (f.y1 - f.y0) * e;
+      if (u >= 1) {
+        this.flight = null;
+        this.target.set(f.x1, c.target.y, f.z1);
+      }
+      this.apply();
+      return;
     }
     // Keep the focus on the terrain surface (never below the sea).
     const ground = Math.max(this.terrain.heightAt(this.target.x, this.target.z), 0);
@@ -257,6 +333,13 @@ export class CameraController {
 
   shake(strength: number): void {
     this.shakeAmt = Math.max(this.shakeAmt, strength);
+  }
+
+  private rumble = { strength: 0, left: 0, total: 1 };
+
+  /** Keep shaking for a while (earthquakes), easing out. */
+  shakeFor(strength: number, seconds: number): void {
+    this.rumble = { strength: Math.max(this.rumble.strength, strength), left: Math.max(this.rumble.left, seconds), total: Math.max(seconds, 0.1) };
   }
 
   /** Current smoothed focus (for shadows, audio listener, LOD). */

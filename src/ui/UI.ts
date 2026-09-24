@@ -1,7 +1,9 @@
 import type { Game, Speed, Tool } from '../game/Game';
 import type { FeedEvent } from '../sim/events';
 import { civFood, civStored } from '../sim/settlement';
-import { POWERS } from '../powers/GodPowers';
+import { CATEGORIES, POWER, POWERS, type PowerCategory, type PowerId } from '../powers/GodPowers';
+import { ConversationPanel } from './ConversationPanel';
+import type { MindService } from '../mind/MindService';
 import { h, iconEl, escapeHtml, hex, setHtml, setText } from './dom';
 import { ICON_COLORS, icon } from './icons';
 import { Inspector } from './Inspector';
@@ -24,9 +26,19 @@ export interface UIHooks {
   getVolume: () => number;
   toggleDebug: () => void;
   unlockAudio: () => void;
+  /** Seconds until a power can be used again (0 = ready). */
+  cooldownLeft: (id: PowerId) => number;
+  /** Person picked up by Carry (waiting to be set down), if any. */
+  carrying: () => number | null;
+  mind: MindService;
 }
 
-const TOOL_KEYS: Record<string, Tool> = { Digit1: 'select', Digit2: 'lightning', Digit3: 'rain', Digit4: 'bless', Digit5: 'heal' };
+const TARGET_TEXT: Record<string, string> = {
+  ground: 'Click the land',
+  person: 'Click a person',
+  body: 'Click a body or a fresh grave',
+  civ: "Click a people's land or one of their people",
+};
 
 /** Composes the HUD and panels; refreshes text at a modest rate, positions every frame. */
 export class UI {
@@ -43,6 +55,11 @@ export class UI {
   private readonly statsEl = h('div.hud-stats');
   private readonly speedBtns = new Map<Speed, HTMLButtonElement>();
   private readonly powerBtns = new Map<Tool, HTMLButtonElement>();
+  private readonly tabBtns = new Map<PowerCategory, HTMLButtonElement>();
+  private readonly powerRow = h('div.prow');
+  private category: PowerCategory = 'creation';
+  readonly convo: ConversationPanel;
+  private readonly aiChip = h('button.chip.aichip', { title: 'AI leaders' });
   private readonly hint = h('div.power-hint.glass');
   private readonly pausedBadge = h('div.paused-badge.glass', {}, 'PAUSED');
   private readonly tribe = h('div.tribe.glass');
@@ -70,8 +87,15 @@ export class UI {
     this.minimap = new Minimap(game);
     this.chronicle = new Chronicle(game);
     this.civBar = new CivBar(game);
+    this.convo = new ConversationPanel(game, hooks.mind, (id, text) => this.labels.say(id, text));
+    this.inspector.onTalk = (id) => this.convo.talkTo(id);
+    this.civBar.onTalk = (civId) => this.convo.talkToLeader(civId);
+    this.civBar.onHistory = (civId) => this.chronicle.showCiv(civId);
     this.help = this.buildHelp();
-    this.root.append(h('div.vignette'), this.flashEl, this.labels.el, this.minimap.el, this.chronicle.el, this.buildTime(), this.buildControls(), this.pausedBadge, this.civBar.el, this.civBar.panel, this.feed, this.buildPowers(), this.hint, this.inspector.el, this.toast, this.help, this.tooltip, this.modal);
+    this.root.append(h('div.vignette'), this.flashEl, this.labels.el, this.minimap.el, this.chronicle.el, this.buildTime(), this.buildControls(), this.pausedBadge, this.civBar.el, this.civBar.panel, this.feed, this.buildPowers(), this.hint, this.inspector.el, this.convo.el, this.convo.pill, this.toast, this.help, this.tooltip, this.modal);
+    this.aiChip.addEventListener('click', () => this.openMenu());
+    hooks.mind.events.on('status', () => this.renderAi());
+    this.renderAi();
     this.modal.append(this.menuBody);
     this.modal.addEventListener('pointerdown', (e) => {
       if (e.target === this.modal) this.closeMenu();
@@ -86,7 +110,10 @@ export class UI {
     });
     game.events.on('speed', () => this.renderSpeed());
     game.events.on('tool', () => this.renderTools());
-    game.events.on('session', () => this.bindWorld());
+    game.events.on('session', () => {
+      this.convo.reset();
+      this.bindWorld();
+    });
     this.bindWorld();
     window.addEventListener('keydown', this.onKey);
     game.renderer.domElement.addEventListener('pointermove', (e) => {
@@ -123,7 +150,7 @@ export class UI {
     const dial = h('div.hud-dial', {}, [this.dialIcon]);
     const clock = h('div.hud-clock', {}, [iconEl(icon('clock')), this.clockEl, this.weatherEl]);
     this.weatherEl.append(iconEl(icon('rain')), 'Rain');
-    return h('div.hud-time.glass', {}, [dial, h('div', {}, [this.dayEl, clock]), this.statsEl]);
+    return h('div.hud-time.glass', {}, [dial, h('div', {}, [this.dayEl, clock]), this.statsEl, this.aiChip]);
   }
 
   private buildControls(): HTMLElement {
@@ -140,26 +167,56 @@ export class UI {
     menu.append(iconEl(icon('menu')));
     const help = h('button.iconbtn.glass', { title: 'Controls (H)', onclick: () => this.help.classList.toggle('hidden') });
     help.append(iconEl(icon('keyboard')));
-    const book = h('button.iconbtn.glass', { title: 'Chronicle of the tribe (C)', onclick: () => this.chronicle.toggle() });
+    const book = h('button.iconbtn.glass', { title: 'Chronicles of the peoples (C)', onclick: () => this.chronicle.toggle() });
     book.append(iconEl(icon('book')));
-    return h('div.hud-controls', {}, [speed, book, help, menu]);
+    const world = h('button.iconbtn.glass', { title: 'World view (M)', onclick: () => this.game.toggleWorldView() });
+    world.append(iconEl(icon('world')));
+    return h('div.hud-controls', {}, [speed, world, book, help, menu]);
   }
 
   private buildPowers(): HTMLElement {
     const bar = h('div.powers.glass');
-    const defs: Array<{ id: Tool; name: string; key: string; hint: string; ic: string }> = [
-      { id: 'select', name: 'Observe', key: '1', hint: 'Click a human to see what they are thinking. Double-click to follow.', ic: 'select' },
-      ...POWERS.map((p) => ({ id: p.id as Tool, name: p.name, key: p.key, hint: p.hint, ic: p.id })),
-    ];
-    for (const d of defs) {
-      const b = h('button.power', { 'data-tool': d.id, onclick: () => this.game.setTool(d.id) }) as HTMLButtonElement;
-      b.append(iconEl(icon(d.ic)), h('span.plabel', {}, d.name), h('span.key', {}, d.key));
-      b.addEventListener('mouseenter', () => this.showHint(d.name, d.hint));
-      b.addEventListener('mouseleave', () => this.showHint(null));
-      bar.append(b);
-      this.powerBtns.set(d.id, b);
+    const tabs = h('div.ptabs');
+    const observe = h('button.power.observe', { 'data-tool': 'select', onclick: () => this.game.setTool('select') }) as HTMLButtonElement;
+    observe.append(iconEl(icon('select')), h('span.plabel', {}, 'Observe'), h('span.key', {}, '1'));
+    observe.addEventListener('mouseenter', () => this.showHint('Observe', 'Click a human to see what they are thinking. Double-click to follow. T to speak to them.'));
+    observe.addEventListener('mouseleave', () => this.showHint(null));
+    this.powerBtns.set('select', observe);
+    for (const c of CATEGORIES) {
+      const b = h('button.ptab', { title: `${c.name} (G cycles)`, onclick: () => this.setCategory(c.id) }) as HTMLButtonElement;
+      b.style.setProperty('--pc', c.color);
+      b.append(iconEl(icon(c.icon)), h('span', {}, c.name));
+      tabs.append(b);
+      this.tabBtns.set(c.id, b);
     }
+    bar.append(observe, h('div.pdiv'), h('div.pbody', {}, [tabs, this.powerRow]));
+    this.setCategory(this.category);
     return bar;
+  }
+
+  private setCategory(c: PowerCategory): void {
+    this.category = c;
+    for (const [id, b] of this.tabBtns) b.classList.toggle('on', id === c);
+    for (const [id, b] of this.powerBtns) if (id !== 'select') b.remove();
+    for (const id of [...this.powerBtns.keys()]) if (id !== 'select') this.powerBtns.delete(id);
+    const cat = CATEGORIES.find((x) => x.id === c)!;
+    POWERS.filter((p) => p.category === c).forEach((p, i) => {
+      const b = h('button.power', { 'data-tool': p.id, onclick: () => this.game.setTool(this.game.tool === p.id ? 'select' : p.id) }) as HTMLButtonElement;
+      b.style.setProperty('--pc', cat.color);
+      b.append(iconEl(icon(p.icon)), h('span.plabel', {}, p.name), h('span.key', {}, String(i + 2)), h('span.cd'));
+      b.addEventListener('mouseenter', () => this.showHint(p.name, `${p.hint} ${TARGET_TEXT[p.target]}.`));
+      b.addEventListener('mouseleave', () => this.showHint(null));
+      this.powerRow.append(b);
+      this.powerBtns.set(p.id, b);
+    });
+    this.renderTools();
+  }
+
+  private renderAi(): void {
+    const m = this.hooks.mind;
+    const dot = m.online ? 'on' : m.state === 'checking' ? 'wait' : 'off';
+    this.aiChip.innerHTML = `<span class="icon" style="color:${m.online ? '#ffe38a' : '#9aa3ad'}">${icon('ai')}</span><span class="dot ${dot}"></span>${m.online ? 'AI' : 'Local'}`;
+    this.aiChip.title = `Leaders' minds: ${m.sourceLabel}. ${m.statusText}`;
   }
 
   /** Legacy tribe list (kept for the single-people debug view). */
@@ -180,7 +237,10 @@ export class UI {
       row('Right-drag · <kbd>Q</kbd><kbd>E</kbd>', 'Rotate'),
       row('Wheel · <kbd>Z</kbd><kbd>X</kbd>', 'Zoom · Tilt'),
       row('Click · double-click', 'Inspect · Follow'),
-      row('<kbd>1</kbd>–<kbd>5</kbd>', 'God powers'),
+      row('<kbd>1</kbd> · <kbd>2</kbd>–<kbd>7</kbd>', 'Observe · Powers'),
+      row('<kbd>G</kbd>', 'Next power group'),
+      row('<kbd>T</kbd>', 'Speak to selected'),
+      row('<kbd>M</kbd>', 'World view'),
       row('<kbd>Space</kbd> · <kbd>Tab</kbd>', 'Pause · Next human'),
       row('<kbd>H</kbd> · <kbd>F3</kbd>', 'Help · Debug'),
     ]);
@@ -195,17 +255,33 @@ export class UI {
     const g = this.game;
     if (e.code === 'Escape') {
       if (this.modal.classList.contains('on')) this.closeMenu();
+      else if (this.convo.isOpen) this.convo.minimize();
       else if (g.tool !== 'select') g.setTool('select');
       else if (g.selectedId !== null) g.select(null);
       else this.openMenu();
       return;
     }
     if (this.modal.classList.contains('on')) return;
+    const digit = /^Digit([1-9])$/.exec(e.code);
     if (e.code === 'Space') {
       e.preventDefault();
       g.togglePause();
-    } else if (TOOL_KEYS[e.code]) g.setTool(TOOL_KEYS[e.code]!);
-    else if (e.code === 'KeyF' && g.selectedId !== null) g.follow(g.following ? null : g.selectedId);
+    } else if (digit) {
+      const n = Number(digit[1]);
+      if (n === 1) g.setTool('select');
+      else {
+        const list = POWERS.filter((p) => p.category === this.category);
+        const p = list[n - 2];
+        if (p) g.setTool(g.tool === p.id ? 'select' : p.id);
+      }
+    } else if (e.code === 'KeyG') {
+      const i = CATEGORIES.findIndex((c) => c.id === this.category);
+      this.setCategory(CATEGORIES[(i + (e.shiftKey ? CATEGORIES.length - 1 : 1)) % CATEGORIES.length]!.id);
+    } else if (e.code === 'KeyT' && g.selectedId !== null) {
+      this.convo.talkTo(g.selectedId);
+    } else if (e.code === 'KeyM') {
+      g.toggleWorldView();
+    } else if (e.code === 'KeyF' && g.selectedId !== null) g.follow(g.following ? null : g.selectedId);
     else if (e.code === 'KeyH') this.help.classList.toggle('hidden');
     else if (e.code === 'KeyC') this.chronicle.toggle();
     else if (e.code === 'Tab') {
@@ -344,11 +420,24 @@ export class UI {
     const labelsBox = h('input', { type: 'checkbox' }) as HTMLInputElement;
     labelsBox.checked = this.labels.showAll;
     labelsBox.onchange = () => (this.labels.showAll = labelsBox.checked);
+    const mind = this.hooks.mind;
+    const aiBox = h('input', { type: 'checkbox' }) as HTMLInputElement;
+    aiBox.checked = mind.enabled;
+    const aiStatus = h('div.aistatus');
+    const paintAi = () => {
+      const dot = mind.online ? 'on' : mind.state === 'checking' ? 'wait' : 'off';
+      aiStatus.innerHTML = `<span class="dot ${dot}"></span>${escapeHtml(mind.statusText)}${mind.online && mind.lastLatency ? ` <span class="muted">Last reply ${Math.round(mind.lastLatency)} ms · ${mind.calls} calls${mind.failures ? ` · ${mind.failures} fell back` : ''}</span>` : ''}`;
+    };
+    paintAi();
+    const unsubAi = mind.events.on('status', paintAi);
+    this.menuCleanup = unsubAi;
+    aiBox.onchange = () => mind.setEnabled(aiBox.checked);
+    const retry = h('button.mini', { onclick: () => void mind.refresh() }, 'Check again');
     this.menuBody.innerHTML = '';
     this.menuBody.append(
       h('h2', {}, 'Kaoe'),
       h('div.tag', {}, `Day ${g.world.day} · ${g.world.living.length} living · seed ${g.world.seed}`),
-      btn('play', 'Resume', 'Back to the island', () => this.closeMenu(), '.primary'),
+      btn('play', 'Resume', 'Back to the world', () => this.closeMenu(), '.primary'),
       btn('save', 'Save game', quick ? `Overwrite: ${quick}` : 'Store this world in your browser', () => {
         const msg = this.hooks.save();
         this.closeMenu();
@@ -356,7 +445,7 @@ export class UI {
       }),
       btn('load', 'Load quick save', quick ?? 'No save yet', () => this.doLoad('quick'), '', !quick),
       btn('clock', 'Load autosave', auto ?? 'No autosave yet', () => this.doLoad('auto'), '', !auto),
-      btn('globe', 'New world', 'Generate a fresh island and tribe', () => {
+      btn('globe', 'New world', 'A fresh land with four new peoples', () => {
         const v = seedInput.value.trim();
         const seed = v ? Number(v.replace(/\D/g, '')) || hashSeed(v) : null;
         this.closeMenu();
@@ -365,6 +454,7 @@ export class UI {
       h('div.seedrow', {}, [seedInput]),
       h('div.row2', {}, [iconEl(icon('sound')), 'Volume', vol]),
       h('div.row2', {}, [h('label', {}, [labelsBox, 'Show thought bubbles'])]),
+      h('div.aibox', {}, [h('div.row2', {}, [h('label', {}, [aiBox, 'AI leaders (Gemini, through the game server)']), retry]), aiStatus]),
     );
     this.modal.classList.add('on');
     this.hooks.unlockAudio();
@@ -383,7 +473,11 @@ export class UI {
     this.showToast(msg, 'load');
   }
 
+  private menuCleanup: (() => void) | null = null;
+
   closeMenu(): void {
+    this.menuCleanup?.();
+    this.menuCleanup = null;
     this.modal.classList.remove('on');
     if (this.resumeSpeed !== null) {
       this.game.setSpeed(this.resumeSpeed);
@@ -397,6 +491,8 @@ export class UI {
     this.labels.update();
     this.minimap.update(dt);
     this.civBar.update(dt);
+    this.convo.update(dt);
+    this.renderCooldowns();
     this.refresh -= dt;
     if (this.refresh <= 0) {
       this.refresh = 0.2;
@@ -451,10 +547,26 @@ export class UI {
   private renderTools(): void {
     for (const [t, b] of this.powerBtns) b.classList.toggle('on', t === this.game.tool);
     const canvas = this.game.renderer.domElement;
-    canvas.style.cursor = this.game.tool === 'select' ? '' : cursorFor(this.game.tool);
-    if (this.game.tool !== 'select') {
-      const p = POWERS.find((x) => x.id === this.game.tool);
-      if (p) this.showHintBriefly(p.name, p.hint);
+    const tool = this.game.tool;
+    const def = tool !== 'select' ? POWER[tool as PowerId] : undefined;
+    canvas.style.cursor = tool === 'select' ? '' : cursorFor(tool);
+    if (def) {
+      const cat = CATEGORIES.find((c) => c.id === def.category)!;
+      if (def.category !== this.category) this.setCategory(def.category);
+      this.game.targeting = { radius: def.radius, color: cat.color, kind: def.target };
+      this.showHintBriefly(def.name, `${def.hint} ${TARGET_TEXT[def.target]}.`);
+    } else this.game.targeting = null;
+  }
+
+  /** Cooldown shading on power buttons. */
+  private renderCooldowns(): void {
+    for (const [t, b] of this.powerBtns) {
+      if (t === 'select') continue;
+      const def = POWER[t as PowerId];
+      const left = this.hooks.cooldownLeft(t as PowerId);
+      const k = def && left > 0 ? Math.min(1, left / def.cooldown) : 0;
+      b.style.setProperty('--cdk', k.toFixed(3));
+      b.classList.toggle('cooling', k > 0);
     }
   }
 

@@ -9,6 +9,7 @@ import { ParticleSystem, type ParticleSpec } from './Particles';
 import { RainView } from './RainView';
 import { LightningFx } from './LightningFx';
 import type { VegetationView } from './VegetationView';
+import { DivineFx } from './DivineFx';
 
 interface Falling {
   mesh: Mesh;
@@ -39,6 +40,9 @@ export class EffectsView {
   private readonly unsubs: Array<() => void> = [];
   /** Called on lightning so the UI can flash and the camera can shake. */
   onFlash: ((strength: number) => void) | null = null;
+  /** Sustained camera shake (quakes, falling stars). */
+  onShake: ((strength: number, seconds: number) => void) | null = null;
+  readonly divine: DivineFx;
 
   constructor(
     private readonly world: World,
@@ -47,6 +51,10 @@ export class EffectsView {
     private readonly camera: Camera,
   ) {
     this.group.add(this.soft.mesh, this.glow.mesh, this.rain.group, this.lightning.group);
+    this.divine = new DivineFx(world, terrain, this.glow, this.soft, camera);
+    this.divine.onFlash = (k) => this.onFlash?.(k);
+    this.divine.onShake = (k, t) => this.onShake?.(k, t);
+    this.group.add(this.divine.group);
     for (let i = 0; i < 3; i++) {
       const l = new PointLight(0xff7a2a, 0, 22, 1.7);
       this.fireLights.push(l);
@@ -64,6 +72,12 @@ export class EffectsView {
 
   dispose(): void {
     for (const u of this.unsubs) u();
+    this.divine.dispose();
+  }
+
+  /** A soft column of light on someone the god is speaking to. */
+  divineLight(x: number, z: number): void {
+    this.divine.beam(x, z, 0xfff2c0, 2.2, 2.2);
   }
 
   private ground(x: number, z: number): number {
@@ -133,6 +147,45 @@ export class EffectsView {
         this.burst(e.count ?? 5, () => ({ x: e.x + (R() - 0.5) * 0.8, y: y + R() * 0.4, z: e.z + (R() - 0.5) * 0.8, vx: 0, vy: 0.7 + R() * 0.5, vz: 0, life: 1.4 + R() * 0.6, size: 0.14, r: cc.r, g: cc.g, b: cc.b, wobble: 0.3 }), this.glow);
         break;
       }
+      case 'bloom': {
+        const cols = [0xff9fc6, 0xfff27a, 0xffffff, 0xc9a0ff, 0x9be27a].map((q) => c(q));
+        this.burst(e.count ?? 20, (i) => {
+          const cc = cols[i % cols.length]!;
+          const a = R() * Math.PI * 2;
+          const r = R() * 6;
+          return { x: e.x + Math.cos(a) * r, y: y + R() * 2, z: e.z + Math.sin(a) * r, vx: (R() - 0.5) * 0.6, vy: 0.6 + R() * 1.2, vz: (R() - 0.5) * 0.6, life: 2 + R() * 1.5, size: 0.12 + R() * 0.08, r: cc.r, g: cc.g, b: cc.b, gravity: 0.3, drag: 1.2, wobble: 0.9 };
+        });
+        break;
+      }
+      case 'stoneChips': {
+        const cc = c(0x9a948a);
+        this.burst(e.count ?? 10, () => ({ x: e.x + (R() - 0.5), y, z: e.z + (R() - 0.5), vx: (R() - 0.5) * 4, vy: 2 + R() * 3, vz: (R() - 0.5) * 4, life: 0.8 + R() * 0.4, size: 0.1 + R() * 0.1, r: cc.r, g: cc.g, b: cc.b, gravity: 10, drag: 0.5 }));
+        break;
+      }
+      case 'crystalShards': {
+        const cc = c(0x9ff6ff);
+        this.burst(e.count ?? 10, () => ({ x: e.x + (R() - 0.5), y: y + 0.5, z: e.z + (R() - 0.5), vx: (R() - 0.5) * 3, vy: 1.5 + R() * 2, vz: (R() - 0.5) * 3, life: 0.9 + R() * 0.5, size: 0.1 + R() * 0.08, r: cc.r, g: cc.g, b: cc.b, gravity: 7, drag: 0.5 }), this.glow);
+        break;
+      }
+      case 'anger': {
+        const cc = c(0x9a2a4a);
+        this.burst(e.count ?? 20, () => {
+          const a = R() * Math.PI * 2;
+          const r = R() * 25;
+          return { x: e.x + Math.cos(a) * r, y: y + R() * 3, z: e.z + Math.sin(a) * r, vx: 0, vy: 0.4 + R() * 0.6, vz: 0, life: 3 + R() * 2, size: 0.5 + R() * 0.5, grow: 2, r: cc.r, g: cc.g, b: cc.b, a: 0.35, drag: 0.3, wobble: 0.4 };
+        });
+        break;
+      }
+      case 'steam':
+      case 'glow':
+      case 'divine': {
+        const cc = c(e.kind === 'steam' ? 0xe8eef2 : 0xffe9a8);
+        this.burst(e.count ?? 12, () => ({ x: e.x + (R() - 0.5) * 2, y: y + R(), z: e.z + (R() - 0.5) * 2, vx: (R() - 0.5) * 0.4, vy: 1 + R(), vz: (R() - 0.5) * 0.4, life: 1.5 + R(), size: e.kind === 'steam' ? 0.6 : 0.15, grow: e.kind === 'steam' ? 3 : 1, r: cc.r, g: cc.g, b: cc.b, a: e.kind === 'steam' ? 0.35 : 0.9, drag: 0.4 }), e.kind === 'steam' ? this.soft : this.glow);
+        break;
+      }
+      case 'quake':
+      case 'meteor':
+      case 'wind':
       case 'zzz':
         break;
     }
@@ -285,6 +338,7 @@ export class EffectsView {
       if (h > 1.3) this.glow.spawn({ x, y: h + 0.4 + R() * 1.2, z, vx: (R() - 0.5) * 0.3, vy: 0.05, vz: (R() - 0.5) * 0.3, life: 4 + R() * 3, size: 0.09, r: 0.85, g: 1, b: 0.45, wobble: 0.35, a: 0.9 });
     }
 
+    this.divine.update(dt, simDt, time);
     this.soft.update(simDt > 0 ? dt : 0, time);
     this.glow.update(dt, time);
     this.rain.update(time, focus, camDist, w.weather.clouds, w.weather.windX, w.weather.windZ);

@@ -5,6 +5,8 @@ import { STATE_CODE, World } from '../sim/World';
 import { BLUEPRINTS } from '../sim/blueprints';
 import type { FeedEvent } from '../sim/events';
 import type { Drought, FogBank, RainCloud } from '../sim/weather';
+import { shapeTerrain, type TerrainEdit } from '../sim/terrainEdit';
+import type { WorldEventRecord } from '../sim/worldEvents';
 import type { DangerZone, Inventory, ResourceKind, ResourceNode, ScorchMark, Structure } from '../sim/types';
 import type { TribeStats } from '../sim/World';
 import { Civilization, setObjectiveCounter, type CivEffect, type CivSpeed, type CivStats, type DivineMemory, type GodRequest, type HistoryEntry, type LeaderMind, type Objective, type Relation, type Reputation, type Settlement } from '../civ/Civilization';
@@ -93,6 +95,12 @@ export interface SaveFile {
   idState: number;
   rng: number;
   weather: { rng: number; nextNatural: number; windX: number; windZ: number; clouds: RainCloud[]; fogs: FogBank[]; droughts: Drought[] };
+  /** Land the god reshaped, in order (replayed on load). */
+  terrainEdits?: TerrainEdit[];
+  presence?: World['presence'];
+  worldEvents?: WorldEventRecord[];
+  nextWorldEvent?: number;
+  scheduled?: World['scheduled'];
   resources: ResourceDelta[];
   structures: Structure[];
   agents: AgentSave[];
@@ -165,6 +173,11 @@ export function serialize(w: World): SaveFile {
       fogs: w.weather.fogs.map((f) => ({ ...f })),
       droughts: w.weather.droughts.map((d) => ({ ...d })),
     },
+    terrainEdits: w.terrainEdits.map((e) => ({ ...e })),
+    presence: w.presence ? { ...w.presence } : null,
+    worldEvents: w.worldEventLog.map((e) => ({ ...e })),
+    nextWorldEvent: w.nextWorldEvent,
+    scheduled: w.scheduled.map((e) => ({ ...e })),
     resources,
     structures: w.structures.map((s) => ({ ...s, incoming: {}, delivered: { ...s.delivered }, stored: { ...s.stored }, residents: [...s.residents], builders: [...s.builders] })),
     agents: w.agents
@@ -250,6 +263,20 @@ export function deserialize(data: SaveFile): World {
   if (!data || typeof data !== 'object') throw new Error('Not a save file');
   if (data.version !== SAVE_VERSION) throw new Error(data.version === 1 ? 'This save is from the old single-island version and cannot be loaded into the new world' : 'Incompatible save file');
   const w = new World(data.seed);
+  // Reshape the land exactly as the god left it (heights, springs, walkability).
+  for (const e of data.terrainEdits ?? []) {
+    const b = shapeTerrain(w, e);
+    w.terrainEdits.push({ ...e });
+    w.nav.refreshTerrain(w.terrain, b.x0, b.z0, b.x1, b.z1);
+    if (e.kind === 'spring' && e.pondId !== undefined) {
+      const p = w.terrain.ponds.find((q) => q.id === e.pondId);
+      if (p) w.addPondWater(p, 'the Godspring');
+    }
+  }
+  w.presence = data.presence ?? null;
+  if (data.worldEvents) w.worldEventLog.push(...data.worldEvents);
+  if (data.nextWorldEvent !== undefined) w.nextWorldEvent = data.nextWorldEvent;
+  if (data.scheduled) w.scheduled.push(...data.scheduled);
   w.worldTime = data.worldTime;
   w.time = data.worldTime;
   w.startTime = data.startTime ?? data.worldTime;

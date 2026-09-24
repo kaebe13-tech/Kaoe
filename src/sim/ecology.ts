@@ -43,7 +43,7 @@ export class Ecology {
         continue;
       }
       if (r.kind === 'rock') continue;
-      if (r.state === 'grown' && r.amount >= r.max && !r.blessed) continue;
+      if (r.state === 'grown' && r.amount >= r.max && !r.blessed && !w.weather.droughts.length) continue;
       const rate = this.rateAt(w, r.x, r.z);
       if (rate > 0) this.grow(w, r, dt * rate);
     }
@@ -78,8 +78,19 @@ export class Ecology {
 
   private grow(w: World, r: ResourceNode, dt: number): void {
     const rain = w.rainAt(r.x, r.z);
-    const boost = (1 + rain * 2) * (r.blessed ? 2 : 1);
+    const dry = w.weather.droughts.length ? w.weather.droughtAt(r.x, r.z, w.worldTime) : 0;
+    const boost = (1 + rain * 2) * (r.blessed ? 2 : 1) * (1 - dry * 0.95);
     if (r.state === 'grown') {
+      // Drought withers fruit on the branch.
+      if (dry > 0.4 && r.amount > 0 && (r.kind === 'berryBush' || r.kind === 'fruitTree' || r.kind === 'mushroom')) {
+        r.regrow -= (dt / (HOUR * 2)) * dry;
+        if (r.regrow <= -1) {
+          r.regrow = 0;
+          r.amount--;
+          w.events.emit('resourceChanged', r);
+        }
+        return;
+      }
       if (r.amount >= r.max) return;
       let perUnit: number;
       if (r.kind === 'berryBush') perUnit = HOUR * 3;

@@ -44,6 +44,7 @@ import { LANDMARK_INFO } from '../world/biomes';
 import { onCooldown, type Candidate } from './brainCore';
 import {
   AddFuel,
+  Behold,
   Build,
   CatchRain,
   Cower,
@@ -1424,6 +1425,36 @@ const pray: GoalFn = (a, w, ctx) => {
   };
 };
 
+/** When the god manifests, people come to see (the curious and the faithful first). */
+const behold: GoalFn = (a, w, ctx) => {
+  const p = w.presence;
+  if (!p || p.until < w.worldTime || !a.awake) return null;
+  const d = dist(a, p);
+  if (d > 95 || a.needs.thirst < 0.2 || a.needs.hunger < 0.2) return null;
+  if (onCooldown(a, 'behold', ctx.now)) return null;
+  const ang = hash01(a.id, 41) * Math.PI * 2;
+  const ring = 9 + hash01(a.id, 42) * 7;
+  const spot = w.nav.nearestWalkable(p.x + Math.cos(ang) * ring, p.z + Math.sin(ang) * ring, 8);
+  if (!spot) return null;
+  const pull = 0.55 + a.faith * 0.35 + (a.has('curious') ? 0.1 : 0) - (a.has('timid') ? 0.1 : 0);
+  return {
+    goal: 'behold',
+    label: 'Go to the light',
+    icon: 'star',
+    score: pull * travel(d * 0.5),
+    reason: 'The god has come down among us',
+    targetLabel: `The light (${Math.round(d)}m)`,
+    target: spot,
+    key: 'behold',
+    thought: pickLine(a, ['Is it... is it really the god?', 'I have to see it with my own eyes!', 'The sky has come down to us!']),
+    build: () => [new MoveTo(() => spot, 'the light', { arrive: 1.2, run: d > 25 }), new Behold(30 + hash01(a.id, 43) * 20)],
+    onComplete: (ag, wd) => {
+      ag.brain.cooldowns.set('behold', wd.time + HOUR * 3);
+      return 'Knelt before the god who walked among us.';
+    },
+  };
+};
+
 /** The faithful travel to sacred wonders their people know of. */
 const pilgrimage: GoalFn = (a, w, ctx) => {
   const civ = ctx.civ;
@@ -1548,6 +1579,7 @@ export const GOALS: Array<{ id: string; fn: GoalFn }> = [
   { id: 'help', fn: help },
   { id: 'socialize', fn: socialize },
   { id: 'pray', fn: pray },
+  { id: 'behold', fn: behold },
   { id: 'pilgrimage', fn: pilgrimage },
   { id: 'play', fn: play },
   { id: 'found', fn: found },

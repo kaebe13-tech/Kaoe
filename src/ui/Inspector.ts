@@ -34,6 +34,9 @@ export class Inspector {
   private readonly friends: HTMLElement;
   private readonly log: HTMLElement;
   private agentId: number | null = null;
+  /** Speak to this person (set by the UI). */
+  onTalk: ((id: number) => void) | null = null;
+  private readonly talkBtn: HTMLButtonElement;
 
   constructor(private readonly game: Game) {
     this.avatar = h('div.avatar');
@@ -43,7 +46,9 @@ export class Inspector {
     this.followBtn.append(iconEl(icon('follow')));
     const close = h('button.iconbtn', { title: 'Close (Esc)', onclick: () => this.game.select(null) });
     close.append(iconEl(icon('close')));
-    const head = h('div.ins-head', {}, [this.avatar, h('div', {}, [this.name, this.sub]), h('div.spacer'), this.followBtn, close]);
+    this.talkBtn = h('button.iconbtn.talkbtn', { title: 'Speak to them as the god (T)', onclick: () => this.agentId !== null && this.onTalk?.(this.agentId) }) as HTMLButtonElement;
+    this.talkBtn.append(iconEl(icon('talk')), 'Speak');
+    const head = h('div.ins-head', {}, [this.avatar, h('div', {}, [this.name, this.sub]), h('div.spacer'), this.talkBtn, this.followBtn, close]);
     this.traits = h('div.traits');
 
     const needs = h('div.needs');
@@ -97,7 +102,11 @@ export class Inspector {
     setText(this.name, a.name);
     const m = mood(a);
     const age = Math.floor(a.age);
-    setText(this.sub, `${a.isChild ? (age < 1 ? 'Newborn' : `Child, ${age}`) : `${age} years`} · ${m.text}`);
+    const civ = w.civOf(a);
+    const role = civ && civ.leaderId === a.id ? `Leader of ${civ.name}` : civ ? civ.name : '';
+    setText(this.sub, `${a.isChild ? (age < 1 ? 'Newborn' : `Child, ${age}`) : `${age} years`} · ${m.text}${role ? ` · ${role}` : ''}`);
+    this.talkBtn.disabled = !a.alive;
+    if (civ) this.avatar.style.boxShadow = `0 0 0 2px #${civ.color.toString(16).padStart(6, '0')}`;
     this.followBtn.classList.toggle('on', this.game.following);
     setHtml(
       this.traits,

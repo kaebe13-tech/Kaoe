@@ -71,7 +71,14 @@ export class WorldSession {
       ev.on('structureAdded', (s) => this.structures.add(s)),
       ev.on('structureChanged', (s) => this.structures.sync(s)),
       ev.on('structureRemoved', (s) => this.structures.remove(s.id)),
+      ev.on('terrainChanged', (b) => {
+        this.terrainView.rebuildRegion(b.x0, b.z0, b.x1, b.z1);
+        this.vegetation.invalidateDecor(b.x0, b.z0, b.x1, b.z1);
+        for (const p of world.terrain.ponds) this.water.addPond(p);
+      }),
     );
+    // Springs made in earlier sessions (replayed from the save).
+    for (const p of world.terrain.ponds) this.water.addPond(p);
     this.uploadWear();
     this.uploadTerritory();
   }

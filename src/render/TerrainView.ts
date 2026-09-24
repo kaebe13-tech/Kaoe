@@ -76,6 +76,8 @@ interface Chunk {
   radius: number;
   lods: Mesh[];
   current: number;
+  gx: number;
+  gz: number;
 }
 
 /**
@@ -88,8 +90,15 @@ export class TerrainView {
   readonly uniforms: TerrainUniforms;
   private readonly chunks: Chunk[] = [];
   readonly material: MeshLambertMaterial;
+  private readonly colors: Float32Array;
+  private readonly quads: number;
 
-  constructor(terrain: Terrain, heightTex: DataTexture, wearTex: DataTexture, territoryTex: DataTexture) {
+  constructor(
+    private readonly terrain: Terrain,
+    heightTex: DataTexture,
+    wearTex: DataTexture,
+    territoryTex: DataTexture,
+  ) {
     this.uniforms = {
       uHeightTex: { value: heightTex },
       uWearTex: { value: wearTex },
@@ -169,10 +178,12 @@ vec4 terr(vec2 xz) { return texture2D(uTerritory, (xz + uWorldHalf) / uWorldSize
     this.material = mat;
 
     const colors = computeColors(terrain);
+    this.colors = colors;
     this.mesh = new Group();
     this.mesh.name = 'terrain';
     const res = terrain.res;
     const quads = (res - 1) / CHUNKS;
+    this.quads = quads;
     for (let cz = 0; cz < CHUNKS; cz++) {
       for (let cx = 0; cx < CHUNKS; cx++) {
         const lods: Mesh[] = [];
@@ -187,9 +198,37 @@ vec4 terr(vec2 xz) { return texture2D(uTerritory, (xz + uWorldHalf) / uWorldSize
           this.mesh.add(m);
         }
         const bs = lods[0]!.geometry.boundingSphere!;
-        this.chunks.push({ center: bs.center.clone(), radius: bs.radius, lods, current: 0 });
+        this.chunks.push({ center: bs.center.clone(), radius: bs.radius, lods, current: 0, gx: cx, gz: cz });
       }
     }
+  }
+
+  /** The land changed inside a world rectangle: repaint it and rebuild the chunks it touches. */
+  rebuildRegion(x0: number, z0: number, x1: number, z1: number): void {
+    const t = this.terrain;
+    const rect = {
+      ix0: Math.max(0, Math.floor(t.toGrid(x0)) - 6),
+      iz0: Math.max(0, Math.floor(t.toGrid(z0)) - 6),
+      ix1: Math.min(t.res - 1, Math.ceil(t.toGrid(x1)) + 6),
+      iz1: Math.min(t.res - 1, Math.ceil(t.toGrid(z1)) + 6),
+    };
+    computeColors(t, this.colors, rect);
+    for (const c of this.chunks) {
+      const cx0 = c.gx * this.quads;
+      const cz0 = c.gz * this.quads;
+      if (cx0 > rect.ix1 || cx0 + this.quads < rect.ix0 || cz0 > rect.iz1 || cz0 + this.quads < rect.iz0) continue;
+      c.lods.forEach((m, l) => {
+        m.geometry.dispose();
+        m.geometry = buildChunk(t, this.colors, cx0, cz0, this.quads, LOD_STRIDES[l]!);
+      });
+      const bs = c.lods[0]!.geometry.boundingSphere!;
+      c.center.copy(bs.center);
+      c.radius = bs.radius;
+    }
+    const tex = this.uniforms.uHeightTex.value;
+    const data = tex.image.data as Uint16Array;
+    for (let iz = rect.iz0; iz <= rect.iz1; iz++) for (let ix = rect.ix0; ix <= rect.ix1; ix++) data[iz * t.res + ix] = DataUtils.toHalfFloat(t.heights[iz * t.res + ix]!);
+    tex.needsUpdate = true;
   }
 
   /** Pick a level of detail per chunk from the camera position. */
@@ -216,11 +255,15 @@ function hexToVec(hex: number): string {
   return `${c.r.toFixed(4)}, ${c.g.toFixed(4)}, ${c.b.toFixed(4)}`;
 }
 
-/** Per-sample colours for the whole heightfield, with soft blending between biomes. */
-function computeColors(terrain: Terrain): Float32Array {
+/** Per-sample colours for the heightfield (or a rectangle of it), with soft blending between biomes. */
+function computeColors(terrain: Terrain, target?: Float32Array, rect?: { ix0: number; iz0: number; ix1: number; iz1: number }): Float32Array {
   const res = terrain.res;
   const cell = terrain.cell;
-  const colors = new Float32Array(res * res * 3);
+  const colors = target ?? new Float32Array(res * res * 3);
+  const ix0 = rect?.ix0 ?? 0;
+  const iz0 = rect?.iz0 ?? 0;
+  const ix1 = rect?.ix1 ?? res - 1;
+  const iz1 = rect?.iz1 ?? res - 1;
   const n1 = new Simplex2(1234);
   const n2 = new Simplex2(5678);
   const pal = new Map<number, { g0: Color; g1: Color; forest: Color; r0: Color; r1: Color }>();
@@ -258,8 +301,8 @@ function computeColors(terrain: Terrain): Float32Array {
     [-4, -4],
   ];
   const blend = { g0: new Color(), g1: new Color(), forest: new Color(), r0: new Color(), r1: new Color() };
-  for (let iz = 0; iz < res; iz++) {
-    for (let ix = 0; ix < res; ix++) {
+  for (let iz = iz0; iz <= iz1; iz++) {
+    for (let ix = ix0; ix <= ix1; ix++) {
       const i = iz * res + ix;
       const x = ix * cell - WORLD_HALF;
       const z = iz * cell - WORLD_HALF;

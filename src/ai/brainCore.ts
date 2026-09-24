@@ -6,6 +6,7 @@ import type { Action } from './Action';
 
 export type GoalId =
   | 'flee'
+  | 'behold'
   | 'drink'
   | 'eat'
   | 'sleep'

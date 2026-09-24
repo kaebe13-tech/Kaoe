@@ -10,6 +10,8 @@ import { World } from './World';
 import type { Civilization } from '../civ/Civilization';
 import { CivSystem, ensureLeaders } from '../civ/civSystem';
 import type { Agent } from '../agents/Agent';
+import { processScheduled } from '../powers/GodPowers';
+import { worldEvents } from './worldEvents';
 
 /** Most substeps one civilization may take per world step (8x speed). */
 const MAX_SUBSTEPS = 8;
@@ -49,6 +51,8 @@ export class Simulation {
     const shower = w.weather.update(dt, w.worldTime);
     if (shower) w.log(shower.peak > 0.75 ? 'A storm is rolling in!' : 'Dark clouds roll in. Rain is coming.', 'rain', 2, shower);
     stormLightning(w, dt);
+    processScheduled(w);
+    worldEvents(w, dt);
     // Work out how many substeps each civilization takes this world step.
     let totalSub = 0;
     for (const civ of w.civs) {

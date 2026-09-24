@@ -101,4 +101,8 @@ export interface SimEvents {
   /** A civilization-level event (first contact, new leader...) the UI may want to spotlight. */
   civEvent: { civId: number; kind: string; text: string; x?: number; z?: number; other?: number };
   territory: void;
+  /** The land changed shape inside this rectangle (god powers). */
+  terrainChanged: { x0: number; z0: number; x1: number; z1: number };
+  /** Something the god did that the views should show (presence, signs in the sky). */
+  divineFx: { kind: string; x: number; z: number; r?: number; t?: number; civId?: number };
 }

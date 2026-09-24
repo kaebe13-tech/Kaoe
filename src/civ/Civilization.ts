@@ -131,7 +131,7 @@ export interface Settlement {
   capital: boolean;
 }
 
-export type CivEffectKind = 'blessed' | 'cursed' | 'inspireExplore' | 'inspireBuild' | 'peace' | 'harvest' | 'wrath';
+export type CivEffectKind = 'blessed' | 'cursed' | 'inspireExplore' | 'inspireBuild' | 'peace' | 'harvest' | 'wrath' | 'fertile';
 
 export interface CivEffect {
   kind: CivEffectKind;
@@ -170,6 +170,18 @@ export interface LeaderMind {
   planSource: 'local' | 'ai';
   /** God commands they remember (text + whether they agreed). */
   commands: Array<{ time: number; text: string; accepted: boolean }>;
+  /** Promises the god made them (kept when a matching act comes in time). */
+  promises: GodPromise[];
+  /** Reasons queued for the next strategic review. */
+  pending?: string[];
+}
+
+export interface GodPromise {
+  kind: RequestKind;
+  text: string;
+  time: number;
+  until: number;
+  status: 'open' | 'kept' | 'broken';
 }
 
 export interface CivKnowledge {
@@ -232,7 +244,7 @@ export class Civilization {
   readonly objectives: Objective[] = [];
   readonly effects: CivEffect[] = [];
   readonly requests: GodRequest[] = [];
-  readonly mind: LeaderMind = { memories: [], summary: '', lastSpeech: '', mood: 'hopeful', lastPlan: -1e9, planSource: 'local', commands: [] };
+  readonly mind: LeaderMind = { memories: [], summary: '', lastSpeech: '', mood: 'hopeful', lastPlan: -1e9, planSource: 'local', commands: [], promises: [] };
   readonly stats: CivStats = { births: 0, deaths: 0, built: 0, peak: 0, discoveries: 0 };
   /** Cooldowns for civ-level systems (keyed, civ-clock times). */
   readonly timers = new Map<string, number>();

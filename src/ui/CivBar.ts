@@ -5,6 +5,7 @@ import { civFood, civStored, eraOf } from '../sim/settlement';
 import { PERSONAS } from '../civ/persona';
 import { LANDMARK_INFO } from '../world/biomes';
 import { escapeHtml, h, hex, setHtml } from './dom';
+import { DAY_LENGTH } from '../world/config';
 
 const SPEED_LABEL = (s: number) => (s === 0 ? '❚❚' : s < 1 ? `${s}×`.replace('0.', '.') : `${s}×`);
 
@@ -17,11 +18,37 @@ export class CivBar {
   readonly panel = h('div.civpanel.glass');
   private selected: number | null = null;
   private refresh = 0;
+  /** Speak to a people's leader; open their history; answer a prayer (set by the UI/app). */
+  onTalk: ((civId: number) => void) | null = null;
+  onHistory: ((civId: number) => void) | null = null;
+  onAnswer: ((civId: number, reqId: number, grant: boolean) => void) | null = null;
 
   constructor(private readonly game: Game) {
     this.panel.classList.add('hidden');
+    game.events.on('civClick', (id) => this.select(id));
+    this.panel.addEventListener('pointerdown', (e) => e.stopPropagation());
     this.panel.addEventListener('click', (e) => {
       const t = e.target as HTMLElement;
+      const ans = t.closest<HTMLElement>('[data-answer]');
+      if (ans && this.selected !== null) {
+        this.onAnswer?.(this.selected, Number(ans.dataset.req), ans.dataset.answer === 'grant');
+        this.render(true);
+        return;
+      }
+      const go = t.closest<HTMLElement>('[data-goto]');
+      if (go) {
+        const [x, z] = (go.dataset.goto ?? '0,0').split(',').map(Number);
+        this.game.flyTo(x!, z!, 40, 0.8);
+        return;
+      }
+      if (t.closest('[data-talk]') && this.selected !== null) {
+        this.onTalk?.(this.selected);
+        return;
+      }
+      if (t.closest('[data-history]') && this.selected !== null) {
+        this.onHistory?.(this.selected);
+        return;
+      }
       const sp = t.closest<HTMLElement>('[data-speed]');
       if (sp && this.selected !== null) {
         const civ = this.game.world.civs[this.selected];
@@ -48,14 +75,9 @@ export class CivBar {
     if (id !== null) {
       const civ = this.game.world.civs[id];
       const home = civ?.capital;
-      if (home) {
-        const c = this.game.controls;
-        c.follow = null;
-        c.jumpTo(home.x, home.z, 70);
-        c.pitch = 0.75;
-      }
+      if (home) this.game.flyTo(home.x, home.z, 80, 0.8);
     }
-    this.game.session.terrainView.uniforms.uHighlight.value = id === null ? 0 : id + 1;
+    this.game.highlightCiv = id;
     this.render(true);
   }
 
@@ -100,12 +122,24 @@ export class CivBar {
     const hist = civ.history.slice(-5).reverse().map((e) => `<li><span class="d">Day ${e.day}</span> ${escapeHtml(e.text)}</li>`).join('');
     const speeds = CIV_SPEEDS.map((s) => `<button data-speed="${s}" class="${civ.speed === s ? 'on' : ''}">${SPEED_LABEL(s)}</button>`).join('');
     const wonders = [...civ.knowledge.landmarks].map((id) => w.terrain.landmarks.find((l) => l.id === id)).filter(Boolean).map((l) => LANDMARK_INFO[l!.kind].title);
-    const reqs = civ.requests.filter((r) => r.status === 'open').map((r) => `<div class="req">🙏 “${escapeHtml(r.text)}”</div>`).join('');
+    const reqs = civ.requests
+      .filter((r) => r.status === 'open')
+      .map((r) => {
+        const by = w.agent(r.by);
+        const left = Math.max(0, (r.expires - w.worldTime) / (DAY_LENGTH / 24));
+        return `<div class="req"><div>🙏 <b>${escapeHtml(by?.name ?? 'They')}</b> prays: “${escapeHtml(r.text)}”</div><div class="reqa"><button data-answer="grant" data-req="${r.id}">Grant</button><button data-answer="refuse" data-req="${r.id}">Refuse</button><button data-goto="${r.x.toFixed(1)},${r.z.toFixed(1)}">Go there</button><span class="muted">${left < 1 ? 'less than an hour left' : `${Math.round(left)} h left`}</span></div></div>`;
+      })
+      .join('');
+    const done = civ.requests.filter((r) => r.status !== 'open').slice(-3).reverse().map((r) => `<li><span class="rs ${r.status}">${r.status}</span> ${escapeHtml(r.text)}</li>`).join('');
+    const promises = (civ.mind.promises ?? []).slice(-3).reverse().map((p) => `<li><span class="rs ${p.status === 'kept' ? 'granted' : p.status === 'broken' ? 'refused' : 'open'}">${p.status === 'open' ? 'promised' : p.status}</span> ${escapeHtml(p.text)}</li>`).join('');
+    const commands = civ.mind.commands.slice(-3).reverse().map((c) => `<li><span class="rs ${c.accepted ? 'granted' : 'refused'}">${c.accepted ? 'obeyed' : 'refused'}</span> ${escapeHtml(c.text)}</li>`).join('');
+    const mindSrc = civ.mind.planSource === 'ai' ? '<span class="aitag">✦ AI mind</span>' : '<span class="aitag local">local mind</span>';
     const html = `
       <div class="ch" style="--c:${hex(civ.color)}"><span class="banner"></span><div><div class="cn">${escapeHtml(civ.name)}</div><div class="cp">the ${escapeHtml(civ.people)} · ${era} · ${mood}</div></div><button class="x" data-close>✕</button></div>
       <div class="ident">${escapeHtml(civ.def.identity)}</div>
-      ${leader ? `<div class="leader" data-leader>👑 <b>${escapeHtml(leader.name)}</b> leads them, ${leader.persona.map((t) => PERSONAS[t].label.toLowerCase()).join(' and ')}. <u>Find</u></div>` : ''}
-      ${civ.mind.lastSpeech ? `<div class="speech">“${escapeHtml(civ.mind.lastSpeech)}”</div>` : ''}
+      ${leader ? `<div class="leader" data-leader>👑 <b>${escapeHtml(leader.name)}</b> leads them, ${leader.persona.map((t) => PERSONAS[t].label.toLowerCase()).join(' and ')}. <u>Find</u> ${mindSrc}</div>` : '<div class="leader muted">They have no leader right now.</div>'}
+      ${civ.mind.lastSpeech ? `<div class="speech">“${escapeHtml(civ.mind.lastSpeech)}”${civ.mind.mood ? `<span class="mood">${escapeHtml(civ.mind.mood)}</span>` : ''}</div>` : ''}
+      <div class="cactions"><button data-talk ${leader ? '' : 'disabled'}>💬 Speak to ${escapeHtml(leader?.name ?? 'their leader')}</button><button data-history>📜 History</button></div>
       ${reqs}
       <div class="stats"><span>👥 ${civ.population}</span><span>🏘 ${civ.settlements.length}</span><span>🍎 ${civFood(w, civ)}</span><span>🪵 ${civStored(w, civ, 'wood')}</span><span>🪨 ${civStored(w, civ, 'stone')}</span><span>💎 ${civStored(w, civ, 'crystal')}</span></div>
       <div class="sect">Speed of their time <span class="muted">· their day ${civ.day}, ${String(Math.floor(civ.hour)).padStart(2, '0')}:${String(Math.floor((civ.hour % 1) * 60)).padStart(2, '0')}${resyncing(civ, w.worldTime) ? ' · falling back into step with the sun' : ''}</span></div>
@@ -114,6 +148,7 @@ export class CivBar {
       <div class="sect">Neighbours</div><div class="rels">${rels}</div>
       <div class="sect">How they see you <span class="muted">· ${escapeHtml(civ.godView)}</span></div>
       ${bar('Faith', civ.rep.faith, '#ffd66b')}${bar('Trust', civ.rep.trust, '#7fe0a8')}${bar('Fear', civ.rep.fear, '#a99cff')}${bar('Anger', civ.rep.anger, '#ff7b6b')}${bar('Awe', civ.rep.awe, '#8fd3ff')}
+      ${done || promises || commands ? `<div class="sect">Between you</div><ul class="obj">${commands}${promises}${done}</ul>` : ''}
       <div class="sect">Known lands</div><div class="muted">${civ.knowledge.regions.size} regions · ${wonders.length ? escapeHtml(wonders.join(', ')) : 'no wonders yet'}</div>
       <div class="sect">Recent history</div><ul class="hist">${hist}</ul>`;
     if (force || !this.panel.contains(document.activeElement)) setHtml(this.panel, html);

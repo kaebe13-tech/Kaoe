@@ -65,8 +65,9 @@ export class Families {
     let worldPop = 0;
     for (const c of w.civs) worldPop += c.population;
     if (worldPop >= MAX_WORLD_POPULATION) return;
+    const fertile = civ.hasEffect('fertile', w.worldTime) ? 1 : 0;
     const last = this.lastBirth.get(hut.id) ?? -Infinity;
-    if (w.time - last < DAY_LENGTH * 1.6) return;
+    if (w.time - last < DAY_LENGTH * (fertile ? 0.6 : 1.6)) return;
     const kids = civ.members.filter((k) => k.alive && k.isChild && k.homeId === hut.id).length;
     if (kids >= (hut.kind === 'house' ? 3 : 2)) return;
     if (a.affinity(b.id) < 0.55 || b.affinity(a.id) < 0.55) return;
@@ -76,7 +77,7 @@ export class Families {
     if (!fed && !stocked) return;
     const blessed = civ.hasEffect('blessed', w.worldTime) ? 0.15 : 0;
     const cursed = civ.hasEffect('cursed', w.worldTime) ? 0.2 : 0;
-    if (!w.rng.chance(0.4 + blessed - cursed)) return;
+    if (!w.rng.chance(0.4 + blessed - cursed + fertile * 0.4)) return;
     this.lastBirth.set(hut.id, w.time);
     this.birth(w, hut, a, b);
   }

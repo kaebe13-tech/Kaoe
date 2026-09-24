@@ -162,6 +162,8 @@ export class StructureView {
     const e = this.entries.get(s.id);
     if (!e) return;
     e.s = s;
+    // The ground may have moved (god powers).
+    e.root.position.y = this.groundY(s);
     const p = s.complete ? 1 : s.progress;
     let key = '';
     const visible: BufferGeometry[] = [];

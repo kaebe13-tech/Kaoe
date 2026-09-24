@@ -26,8 +26,15 @@ export class NavGrid {
     this.blockers = new Uint16Array(n);
     this.cost = new Float32Array(n);
     this.wade = new Uint8Array(n);
-    for (let cz = 0; cz < this.size; cz++) {
-      for (let cx = 0; cx < this.size; cx++) {
+    this.component = new Int32Array(n);
+    this.computeTerrain(terrain, 0, 0, this.size - 1, this.size - 1);
+    this.labelComponents();
+  }
+
+  /** Walkability, cost and wading for a rectangle of cells, from the terrain. */
+  private computeTerrain(terrain: Terrain, cx0: number, cz0: number, cx1: number, cz1: number): void {
+    for (let cz = cz0; cz <= cz1; cz++) {
+      for (let cx = cx0; cx <= cx1; cx++) {
         const x = this.toWorld(cx);
         const z = this.toWorld(cz);
         const h = terrain.heightAt(x, z);
@@ -36,6 +43,7 @@ export class NavGrid {
         let ok = h > 0.22 && slope < 1.05;
         let cost = 1 + slope * 1.6 + (h < 0.7 ? 0.35 : 0);
         const depth = terrain.waterDepthAt(x, z);
+        this.wade[i] = 0;
         if (depth > 0.04) {
           // Rivers can be waded where they are shallow; lakes cannot.
           if (terrain.isRiver(x, z) && depth < 1.15) {
@@ -53,11 +61,12 @@ export class NavGrid {
       const r = Math.ceil(p.radius * 1.8);
       const pcx = this.cellX(p.x);
       const pcz = this.cellZ(p.z);
+      if (pcx + r < cx0 || pcx - r > cx1 || pcz + r < cz0 || pcz - r > cz1) continue;
       for (let dz = -r; dz <= r; dz++) {
         for (let dx = -r; dx <= r; dx++) {
           const cx = pcx + dx;
           const cz = pcz + dz;
-          if (!this.inside(cx, cz)) continue;
+          if (!this.inside(cx, cz) || cx < cx0 || cx > cx1 || cz < cz0 || cz > cz1) continue;
           const i = cz * this.size + cx;
           if (!this.terrainOk[i]) continue;
           const h = terrain.heightAt(this.toWorld(cx), this.toWorld(cz));
@@ -65,8 +74,12 @@ export class NavGrid {
         }
       }
     }
-    // Label connected land so impossible trips (across the sea, onto cliffs) fail instantly.
-    this.component = new Int32Array(n);
+  }
+
+  /** Label connected land so impossible trips (across the sea, onto cliffs) fail instantly. */
+  private labelComponents(): void {
+    const n = this.size * this.size;
+    this.component.fill(0);
     const stack = new Int32Array(n);
     let label = 0;
     for (let i = 0; i < n; i++) {
@@ -90,6 +103,17 @@ export class NavGrid {
         }
       }
     }
+  }
+
+  /** The terrain changed inside a world-space rectangle (god powers): recompute it. */
+  refreshTerrain(terrain: Terrain, x0: number, z0: number, x1: number, z1: number): void {
+    const cx0 = Math.max(0, this.cellX(x0) - 1);
+    const cz0 = Math.max(0, this.cellZ(z0) - 1);
+    const cx1 = Math.min(this.size - 1, this.cellX(x1) + 1);
+    const cz1 = Math.min(this.size - 1, this.cellZ(z1) + 1);
+    this.computeTerrain(terrain, cx0, cz0, cx1, cz1);
+    this.labelComponents();
+    this.version++;
   }
 
   /** Whether two points are on the same connected land (ignoring temporary blockers). */
