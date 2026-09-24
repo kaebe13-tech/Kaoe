@@ -113,12 +113,13 @@ export class Game {
     this.controls.snap();
   }
 
-  replaceWorld(world: World): void {
+  /** Swap in another world. `fresh` worlds get one step so everyone starts with an intention. */
+  replaceWorld(world: World, fresh = false): void {
     this.select(null);
     this.session.dispose();
     this.session = new WorldSession(world, this.scene, this.camera);
     this.session.effects.onFlash = (k) => this.onFlash?.(k);
-    if (world.agents.every((a) => !a.brain.active)) this.session.sim.step(SIM_DT);
+    if (fresh) this.session.sim.step(SIM_DT);
     this.controls.terrain = world.terrain;
     this.acc = 0;
     this.frameStart();

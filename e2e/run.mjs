@@ -215,7 +215,7 @@ const after = await g(() => {
   const w = window.__game.world;
   return { time: w.time, pop: w.agents.length, structs: w.structures.length, names: w.agents.map((a) => a.name).join(','), res: w.resources.size };
 });
-check('load restores state', Math.abs(after.time - before.time) < 0.01 && after.pop === before.pop && after.structs === before.structs && after.names === before.names && after.res === before.res, JSON.stringify(after));
+check('load restores state', Math.abs(after.time - before.time) < 0.01 && after.pop === before.pop && after.structs === before.structs && after.names === before.names && after.res === before.res, JSON.stringify({ before, after }));
 await g(() => window.__game.advance(20 * 2));
 check('simulation continues after load', (await g(() => window.__game.world.living.every((a) => Number.isFinite(a.x) && a.brain.active !== undefined))));
 

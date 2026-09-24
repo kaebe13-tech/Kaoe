@@ -174,7 +174,7 @@ export class App {
   newWorld(seed: number): void {
     const world = new World(seed);
     world.spawnTribe(this.population);
-    this.game.replaceWorld(world);
+    this.game.replaceWorld(world, true);
     this.ui.showToast(`A new island rises from the sea (seed ${seed}).`, 'globe');
   }
 }
