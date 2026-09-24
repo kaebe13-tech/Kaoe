@@ -862,7 +862,13 @@ export function invite(w: World, from: Agent, to: Agent, duration: number): bool
     key: `chat:${from.id}`,
     thought: pickLine(to, [`Oh, hello ${from.name}!`, `${from.name}! What's new?`, `Good to see you, ${from.name}.`]),
     build: () => [new Talk(from.id, duration + 0.6, false)],
+    onComplete: (ag, wd) => {
+      ag.brain.cooldowns.set(`talk:${from.id}`, wd.time + 120);
+      return `Had a good chat with ${from.name}.`;
+    },
   };
+  // Neither of them should turn right around and start the same conversation again.
+  from.brain.cooldowns.set(`talk:${to.id}`, w.time + 120);
   injectPlan(to, w, cand);
   return true;
 }

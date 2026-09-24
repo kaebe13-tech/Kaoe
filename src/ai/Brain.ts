@@ -74,7 +74,8 @@ export function think(a: Agent, w: World): void {
   else if (!locked && !bounce && bestScore > cur + commit) switchNow = true;
   if (!switchNow) return;
 
-  abortActive(a, w, best.urgent ? best.reason.toLowerCase() : `${best.label.toLowerCase()} became more important`);
+  const lc = (t: string) => t.charAt(0).toLowerCase() + t.slice(1);
+  abortActive(a, w, best.urgent ? lc(best.reason) : `${lc(best.label)} became more important`);
   a.brain.lastSwitch = { from: act.goal, at: now };
   a.brain.switches++;
   adopt(a, w, best);

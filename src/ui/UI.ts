@@ -368,7 +368,14 @@ export class UI {
     );
     this.modal.classList.add('on');
     this.hooks.unlockAudio();
+    // The world holds its breath while the menu is open.
+    if (this.game.speed !== 0) {
+      this.resumeSpeed = this.game.speed;
+      this.game.setSpeed(0);
+    }
   }
+
+  private resumeSpeed: Speed | null = null;
 
   private doLoad(slot: string): void {
     const msg = this.hooks.load(slot);
@@ -378,6 +385,10 @@ export class UI {
 
   closeMenu(): void {
     this.modal.classList.remove('on');
+    if (this.resumeSpeed !== null) {
+      this.game.setSpeed(this.resumeSpeed);
+      this.resumeSpeed = null;
+    }
   }
 
   // ---------------------------------------------------------------- per-frame
