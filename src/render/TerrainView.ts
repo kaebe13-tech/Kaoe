@@ -190,10 +190,13 @@ function buildTerrainGeometry(terrain: Terrain): BufferGeometry {
       }
       const sandT = 1 - smoothstep(0.9, 1.7, h + small * 0.25 + big * 0.2);
 
-      rock.copy(C.rockDark).lerp(C.rock, clamp01(small * 0.5 + 0.5)).lerp(C.rockLight, smoothstep(11, 17, h) * 0.6);
+      // Rock: strata bands and a warm/cool shift so cliffs read as stone, not flat grey.
+      const strata = Math.sin(h * 1.35 + big * 2.2) * 0.5 + 0.5;
+      rock.copy(C.rockDark).lerp(C.rock, clamp01(small * 0.5 + 0.5)).lerp(C.rockLight, smoothstep(11, 17, h) * 0.55);
+      rock.offsetHSL(big * 0.02, 0.02 + big * 0.03, (strata - 0.5) * 0.16 - smoothstep(0.9, 1.4, slope) * 0.08);
       // Steep-but-grassy slopes get a darker, earthier green instead of grey smears.
       grass.lerp(C.forest, smoothstep(0.45, 0.8, slope) * 0.45);
-      const rockT = clamp01(smoothstep(0.78, 1.1, slope + big * 0.08) + smoothstep(14, 18, h + big * 2));
+      const rockT = clamp01(smoothstep(0.78, 1.1, slope + big * 0.08) + smoothstep(16.5, 21, h + big * 3));
 
       out.copy(grass).lerp(sand, sandT).lerp(rock, rockT);
 

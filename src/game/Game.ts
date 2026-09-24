@@ -313,7 +313,8 @@ export class Game {
     const focusPt = seeThroughUniforms.uFocus.value;
     if (followed) focusPt.set(followed.x, followed.y + 0.8, followed.z);
     else focusPt.copy(this.controls.focus).setY(this.controls.focus.y + 0.5);
-    seeThroughUniforms.uCutRadius.value = followed ? 1.9 : 1.2;
+    // Only carve a window through foliage when there's someone to look at.
+    seeThroughUniforms.uCutRadius.value = followed ? 1.9 : this.controls.currentDistance < 14 ? 1.1 : 0;
     seeThroughUniforms.uNearFade.value = 3.2;
     s.terrainView.uniforms.uTime.value = this.realTime;
     s.terrainView.uniforms.uWet.value += (rainHere - s.terrainView.uniforms.uWet.value) * Math.min(1, dt * 0.5);

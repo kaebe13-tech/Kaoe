@@ -32,7 +32,7 @@ const FRAG = /* glsl */ `
   float fade = 1.0 - smoothstep(uNearFade * 0.55, uNearFade, camDist);
   vec3 axis = uFocus - cameraPosition;
   float axisLen = length(axis);
-  if (axisLen > 0.001) {
+  if (axisLen > 0.001 && uCutRadius > 0.0) {
     vec3 dir = axis / axisLen;
     float t = dot(toFrag, dir);
     if (t > 0.0 && t < axisLen - 0.8) {

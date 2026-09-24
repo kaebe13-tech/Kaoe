@@ -116,7 +116,8 @@ type GoalFn = (a: Agent, w: World, ctx: ThinkContext) => Candidate | Candidate[]
 // ---------------------------------------------------------------------------
 
 const flee: GoalFn = (a, w, ctx) => {
-  if (!a.awake) return null;
+  // Sleepers wake up for danger too (a burning hut, a strike next to them); the knocked-out can't.
+  if (!a.alive || a.knocked > 0) return null;
   let threat: { x: number; z: number; kind: string; d: number } | null = null;
   const bias = a.has('timid') ? 4 : a.has('brave') ? -1.5 : 0;
   for (const d of w.dangers) {

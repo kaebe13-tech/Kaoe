@@ -110,10 +110,11 @@ void main() {
   // Stylized shore foam: a lapping edge plus bands that roll in toward the beach.
   float n1 = wNoise(vWorld.xz * 0.9 + vec2(uTime * 0.15, -uTime * 0.1));
   float n2 = wNoise(vWorld.xz * 2.7 - vec2(uTime * 0.2, uTime * 0.05));
-  float edge = 1.0 - smoothstep(0.0, 0.18 + n1 * 0.22, depth);
+  float edgeW = mix(0.18 + n1 * 0.22, 0.035 + n1 * 0.03, uCalm);
+  float edge = (1.0 - smoothstep(0.0, edgeW, depth)) * mix(1.0, 0.35, uCalm);
   float band = sin(depth * 5.5 - uTime * 1.6 + n1 * 4.0);
-  float lines = smoothstep(0.82, 0.97, band) * (1.0 - smoothstep(0.25, 1.3, depth)) * step(0.35, n2);
-  float foam = clamp(max(edge, lines * 0.85) * mix(1.0, 0.6, uCalm), 0.0, 1.0);
+  float lines = smoothstep(0.82, 0.97, band) * (1.0 - smoothstep(0.25, 1.3, depth)) * step(0.35, n2) * (1.0 - uCalm);
+  float foam = clamp(max(edge, lines * 0.85), 0.0, 1.0);
   vec3 foamCol = uFoam * (uAmbient * 0.9 + uSunColor * 0.55);
   col = mix(col, foamCol, foam);
 

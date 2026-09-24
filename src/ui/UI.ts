@@ -98,6 +98,11 @@ export class UI {
   }
 
   private bindWorld(): void {
+    this.extinctShown = false;
+    if (!this.modal.contains(this.menuBody)) {
+      this.modal.innerHTML = '';
+      this.modal.append(this.menuBody);
+    }
     for (const u of this.unsubWorld) u();
     this.unsubWorld.length = 0;
     this.feed.innerHTML = '';
@@ -250,7 +255,40 @@ export class UI {
     }
   }
 
+  private extinctShown = false;
+
+  /** When the last human dies, say so and offer a fresh start. */
+  private checkExtinction(): void {
+    const w = this.game.world;
+    if (this.extinctShown || w.agents.length === 0 || w.living.length > 0) return;
+    this.extinctShown = true;
+    const box = h('div.modal.glass');
+    const again = h('button.mbtn.primary', {
+      onclick: () => {
+        this.modal.classList.remove('on');
+        this.hooks.newWorld(null);
+      },
+    });
+    again.append(iconEl(icon('globe')), h('div', {}, [h('div.t', {}, 'A new island'), h('div.d', {}, 'Start over with a new tribe')]));
+    const stay = h('button.mbtn', { onclick: () => this.modal.classList.remove('on') });
+    stay.append(iconEl(icon('close')), h('div', {}, [h('div.t', {}, 'Stay a while'), h('div.d', {}, 'Watch the empty island')]));
+    const born = w.stats.births === 0 ? 'No children were born here' : `${w.stats.births} ${w.stats.births === 1 ? 'child was' : 'children were'} born here`;
+    const built = w.stats.built === 0 ? 'nothing they built remains' : `${w.stats.built} ${w.stats.built === 1 ? 'thing they built still stands' : 'things they built still stand'}`;
+    box.append(h('h2', {}, 'The island is quiet'), h('div.tag', {}, `The last of the tribe died on day ${w.day}. ${born}, and ${built}.`), again, stay);
+    this.menuBody.replaceWith(box);
+    this.modal.innerHTML = '';
+    this.modal.append(box);
+    this.modal.classList.add('on');
+    // Restore the normal menu body for later.
+    const restore = () => {
+      this.modal.innerHTML = '';
+      this.modal.append(this.menuBody);
+    };
+    this.modal.addEventListener('transitionend', () => !this.modal.classList.contains('on') && restore(), { once: false });
+  }
+
   private pushFeed(e: FeedEvent): void {
+    if (e.icon === 'death') setTimeout(() => this.checkExtinction(), 2500);
     const w = this.game.world;
     const col = e.icon === 'death' ? '#ff8fa3' : e.icon === 'lightning' ? '#ffe066' : ICON_COLORS[e.icon] ?? '#f5c451';
     const item = h(e.importance === 3 ? 'div.feed-item.glass.i3' : 'div.feed-item.glass', {
@@ -289,6 +327,10 @@ export class UI {
 
   openMenu(): void {
     const g = this.game;
+    if (!this.modal.contains(this.menuBody)) {
+      this.modal.innerHTML = '';
+      this.modal.append(this.menuBody);
+    }
     const quick = this.hooks.slotInfo('quick');
     const auto = this.hooks.slotInfo('auto');
     const seedInput = h('input', { placeholder: 'Seed (blank = random)', inputmode: 'numeric' }) as HTMLInputElement;
