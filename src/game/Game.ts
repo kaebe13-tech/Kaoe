@@ -361,6 +361,9 @@ export class Game {
     s.structures.animate(this.realTime, look.darkness, (id) => inside.get(id) ?? 0);
     s.landmarks.animate(this.realTime, look.darkness);
     s.lightPool.update(this.controls.focus);
+    s.humans.leaders.clear();
+    for (const c of w.civs) if (c.leaderId !== null) s.humans.leaders.set(c.id, c.leaderId);
+    s.humans.bannerOf = (id) => w.civs[id]?.color ?? 0xd9a441;
     s.humans.update(w.agents, alpha, dt, this.speed === 0);
     s.effects.update(dt, this.speed > 0 ? dt * this.speed * this.debugSpeed : 0, this.realTime, this.controls.focus, this.controls.currentDistance, look.darkness);
     const sel = this.selectedId !== null ? w.agent(this.selectedId) ?? null : null;

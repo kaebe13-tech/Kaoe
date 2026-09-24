@@ -277,3 +277,45 @@ kbd { font-family: var(--font-body); font-weight: 800; font-size: 11px; padding:
 /* Title screen: keep the HUD out of the way until the player begins. */
 .ui-root > * { transition: opacity .9s ease; }
 .intro-mode .ui-root > *:not(.labels):not(.vignette) { opacity: 0 !important; pointer-events: none !important; }
+
+/* ---- Civilizations -------------------------------------------------------- */
+.civbar { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; max-width: 46vw; z-index: 3; pointer-events: auto; }
+.cchip { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,.14); background: rgba(22,28,36,.72); color: #f3efe6; font: 700 13px Nunito, system-ui, sans-serif; cursor: pointer; backdrop-filter: blur(8px); }
+.cchip:hover { background: rgba(40,48,60,.85); }
+.cchip.on { border-color: var(--c); box-shadow: 0 0 0 2px var(--c) inset; }
+.cchip.gone { opacity: .45; }
+.cdot { width: 10px; height: 10px; border-radius: 50%; background: var(--c); box-shadow: 0 0 6px var(--c); }
+.cpop { opacity: .75; font-weight: 800; }
+.cspd { background: var(--c); color: #1b1b1b; border-radius: 6px; padding: 0 5px; font-size: 11px; font-weight: 800; }
+.civpanel { position: absolute; top: 96px; left: 16px; width: 330px; max-height: calc(100vh - 220px); overflow-y: auto; padding: 14px 16px; z-index: 4; color: #efeadf; font: 13px/1.4 Nunito, system-ui, sans-serif; pointer-events: auto; }
+.civpanel.hidden { display: none; }
+.civpanel .ch { display: flex; align-items: center; gap: 10px; }
+.civpanel .banner { width: 14px; height: 38px; background: var(--c); border-radius: 3px 3px 7px 7px; clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 82%, 0 100%); }
+.civpanel .cn { font: 600 19px Fredoka, system-ui, sans-serif; }
+.civpanel .cp { opacity: .75; font-size: 12px; }
+.civpanel .x { margin-left: auto; background: none; border: 0; color: #ccc; cursor: pointer; font-size: 15px; }
+.civpanel .ident { margin: 8px 0; opacity: .85; font-style: italic; }
+.civpanel .leader { cursor: pointer; margin: 6px 0; }
+.civpanel .leader u { color: #ffd66b; }
+.civpanel .speech { margin: 6px 0; padding: 8px 10px; border-left: 3px solid #ffd66b; background: rgba(255,214,107,.08); border-radius: 6px; }
+.civpanel .req { margin: 6px 0; padding: 6px 10px; background: rgba(127,224,168,.1); border-radius: 6px; }
+.civpanel .stats { display: flex; flex-wrap: wrap; gap: 10px; margin: 8px 0; font-weight: 800; }
+.civpanel .sect { margin-top: 10px; font: 600 12px Fredoka, system-ui, sans-serif; letter-spacing: .04em; text-transform: uppercase; opacity: .9; }
+.civpanel .muted, .civpanel li.muted { opacity: .6; text-transform: none; letter-spacing: 0; font-weight: 400; }
+.cspeeds { display: flex; gap: 4px; margin-top: 6px; }
+.cspeeds button { flex: 1; padding: 5px 0; border-radius: 8px; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.06); color: #eee; font: 800 12px Nunito, system-ui; cursor: pointer; }
+.cspeeds button.on { background: #ffd66b; color: #222; }
+.civpanel ul { margin: 4px 0; padding-left: 16px; }
+.civpanel ul.hist { list-style: none; padding: 0; }
+.civpanel ul.hist .d { opacity: .6; font-size: 11px; margin-right: 4px; }
+.rels { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.rel { padding: 2px 8px; border-radius: 999px; font-size: 12px; background: rgba(255,255,255,.08); }
+.rel.friendly { background: rgba(127,224,168,.25); }
+.rel.tense { background: rgba(255,207,74,.25); }
+.rel.hostile { background: rgba(255,123,107,.3); }
+.rep { display: grid; grid-template-columns: 52px 1fr; align-items: center; gap: 8px; font-size: 12px; margin-top: 3px; }
+.rep i { height: 6px; background: rgba(255,255,255,.1); border-radius: 3px; overflow: hidden; }
+.rep b { display: block; height: 100%; border-radius: 3px; }
+.civbar { top: 74px; max-width: 60vw; }
+.civpanel { top: 120px; background: rgba(18,23,30,.94); z-index: 6; }
+body.civ-open .feed { display: none; }

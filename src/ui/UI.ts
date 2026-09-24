@@ -8,6 +8,8 @@ import { Inspector } from './Inspector';
 import { WorldLabels } from './WorldLabels';
 import { Minimap } from './Minimap';
 import { Chronicle } from './Chronicle';
+import { CivBar } from './CivBar';
+import { SPEEDS } from '../game/Game';
 import { activityText, initials, warnings } from './agentInfo';
 import { resourceLabel } from '../sim/types';
 import { BLUEPRINTS } from '../sim/blueprints';
@@ -33,6 +35,7 @@ export class UI {
   private readonly labels: WorldLabels;
   private readonly minimap: Minimap;
   private readonly chronicle: Chronicle;
+  readonly civBar: CivBar;
   private readonly dayEl = h('div.hud-day');
   private readonly clockEl = h('span');
   private readonly dialIcon = h('span.icon');
@@ -66,8 +69,9 @@ export class UI {
     this.labels = new WorldLabels(game);
     this.minimap = new Minimap(game);
     this.chronicle = new Chronicle(game);
+    this.civBar = new CivBar(game);
     this.help = this.buildHelp();
-    this.root.append(h('div.vignette'), this.flashEl, this.labels.el, this.minimap.el, this.chronicle.el, this.buildTime(), this.buildControls(), this.pausedBadge, this.buildTribe(), this.feed, this.buildPowers(), this.hint, this.inspector.el, this.toast, this.help, this.tooltip, this.modal);
+    this.root.append(h('div.vignette'), this.flashEl, this.labels.el, this.minimap.el, this.chronicle.el, this.buildTime(), this.buildControls(), this.pausedBadge, this.civBar.el, this.civBar.panel, this.feed, this.buildPowers(), this.hint, this.inspector.el, this.toast, this.help, this.tooltip, this.modal);
     this.modal.append(this.menuBody);
     this.modal.addEventListener('pointerdown', (e) => {
       if (e.target === this.modal) this.closeMenu();
@@ -124,12 +128,7 @@ export class UI {
 
   private buildControls(): HTMLElement {
     const speed = h('div.speed.glass');
-    const defs: Array<[Speed, string, string]> = [
-      [0, 'pause', 'Pause (Space)'],
-      [1, '1×', 'Normal speed'],
-      [2, '2×', 'Double speed'],
-      [4, '4×', 'Fast forward'],
-    ];
+    const defs: Array<[Speed, string, string]> = SPEEDS.map((s) => [s, s === 0 ? 'pause' : `${String(s).replace('0.', '.')}×`, s === 0 ? 'Pause (Space)' : `World speed ${s}×`] as [Speed, string, string]);
     for (const [s, label, title] of defs) {
       const b = h('button', { title, onclick: () => this.game.setSpeed(s) }) as HTMLButtonElement;
       if (label === 'pause') b.append(iconEl(icon('pause')));
@@ -163,7 +162,8 @@ export class UI {
     return bar;
   }
 
-  private buildTribe(): HTMLElement {
+  /** Legacy tribe list (kept for the single-people debug view). */
+  buildTribe(): HTMLElement {
     const head = h('div.tribe-head', { onclick: () => this.tribe.classList.toggle('collapsed') }, [iconEl(icon('people')), 'Tribe', this.tribeCount]);
     this.tribe.append(head, this.tribeList);
     return this.tribe;
@@ -215,10 +215,10 @@ export class UI {
       e.preventDefault();
       this.hooks.toggleDebug();
     } else if (e.code === 'BracketRight' || e.code === 'Period') {
-      const order: Speed[] = [0, 1, 2, 4];
-      g.setSpeed(order[Math.min(3, order.indexOf(g.speed) + 1)]!);
+      const order = SPEEDS;
+      g.setSpeed(order[Math.min(order.length - 1, order.indexOf(g.speed) + 1)]!);
     } else if (e.code === 'BracketLeft' || e.code === 'Comma') {
-      const order: Speed[] = [0, 1, 2, 4];
+      const order = SPEEDS;
       g.setSpeed(order[Math.max(0, order.indexOf(g.speed) - 1)]!);
     }
   };
@@ -396,6 +396,7 @@ export class UI {
   update(dt: number): void {
     this.labels.update();
     this.minimap.update(dt);
+    this.civBar.update(dt);
     this.refresh -= dt;
     if (this.refresh <= 0) {
       this.refresh = 0.2;
@@ -425,7 +426,8 @@ export class UI {
     const f = this.game.controls.focus;
     this.weatherEl.classList.toggle('on', w.rainAt(f.x, f.z) > 0.15 || w.weather.anyRain > 0.5);
     const pop = w.living.length;
-    const chips = [
+    const actual = this.game.speed > 0 && this.game.actualSpeed < this.game.speed * 0.8 ? `<span class="chip" title="The world is running as fast as this computer allows">⏱ ${this.game.actualSpeed.toFixed(1)}×</span>` : '';
+    const chips = [actual,
       `<span class="chip" title="Population"><span class="icon" style="color:#f5c451">${icon('people')}</span>${pop}</span>`,
       `<span class="chip" title="Civilizations"><span class="icon" style="color:#f2c46b">${icon('home')}</span>${w.civs.filter((c) => c.population > 0).length}</span>`,
     ];

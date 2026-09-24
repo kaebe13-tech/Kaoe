@@ -1,21 +1,35 @@
-import {
-  BufferGeometry,
-  Color,
-  DynamicDrawUsage,
-  Euler,
-  Group,
-  InstancedMesh,
-  Matrix4,
-  MeshLambertMaterial,
-  Quaternion,
-  Vector3,
-} from 'three';
+import { BufferGeometry, Color, DynamicDrawUsage, Euler, Group, InstancedMesh, Matrix4, MeshLambertMaterial, Quaternion, Vector3 } from 'three';
 import { lerpAngle, smoothstep } from '../core/math';
 import { hash01 } from '../core/rng';
 import type { Agent } from '../agents/Agent';
 import type { Terrain } from '../world/Terrain';
-import { BODY, armGeometry, axeGeometry, hairGeometry, hammerGeometry, handFoodGeometry, headGeometry, legGeometry, logBundleGeometry, pouchGeometry, torsoGeometry } from './humanGeometry';
-import { blendPose, computePose, copyPose, newPose, type Pose } from './poses';
+import {
+  BODY,
+  accessoryGeometry,
+  axeGeometry,
+  basketGeometry,
+  beardGeometry,
+  bootGeometry,
+  crystalLoadGeometry,
+  forearmGeometry,
+  garmentGeometry,
+  garmentTrimGeometry,
+  hairGeometry,
+  hammerGeometry,
+  headGeometry,
+  headwearGeometry,
+  logBundleGeometry,
+  mantleGeometry,
+  packGeometry,
+  pickGeometry,
+  robeSkirtGeometry,
+  shinGeometry,
+  staffGeometry,
+  stoneLoadGeometry,
+  thighGeometry,
+  upperArmGeometry,
+} from './humanGeometry';
+import { blendPose, computePose, copyPose, newPose, type Carry, type Pose } from './poses';
 
 interface RenderState {
   pose: Pose;
@@ -24,98 +38,102 @@ interface RenderState {
   blend: number;
   anim: string;
   seed: number;
-  /** Smoothed world position used for rendering (also exposed for labels/picking). */
   pos: Vector3;
   heading: number;
   visible: boolean;
+  /** Stride phase driven by distance actually covered on screen (no foot sliding). */
+  phase: number;
+  lastX: number;
+  lastZ: number;
 }
 
 const BLEND_TIME = 0.28;
-const ZERO = new Matrix4().makeScale(0, 0, 0);
 const _root = new Matrix4();
 const _pelvis = new Matrix4();
 const _m = new Matrix4();
+const _m2 = new Matrix4();
 const _t = new Matrix4();
+const _armR = new Matrix4();
+const _handR = new Matrix4();
+const _handL = new Matrix4();
 const _q = new Quaternion();
 const _e = new Euler();
-const _v = new Vector3();
 const _s = new Vector3(1, 1, 1);
 const _c = new Color();
 const GREY = new Color(0x9a9a9a);
+const WHITE = 0xffffff;
+
+type Part = { mesh: InstancedMesh; per: number };
 
 /**
- * Draws every human with ~12 instanced meshes regardless of population: a tiny procedural
- * rig (pelvis, torso, head, arms, legs + props) posed per frame from the agent's state.
+ * Draws every villager with instanced parts regardless of population: a two-segment rig
+ * (thighs, shins, boots, sleeves, forearms) with garment, face, hair, headwear, accessory and
+ * tool variants, posed per frame from the agent's state.
  */
 export class HumanView {
   readonly group = new Group();
   private readonly states = new Map<number, RenderState>();
   private cap = 0;
-  private torso!: InstancedMesh;
-  private head!: InstancedMesh;
-  private hair: InstancedMesh[] = [];
-  private arms!: InstancedMesh;
-  private legs!: InstancedMesh;
-  private axe!: InstancedMesh;
-  private hammer!: InstancedMesh;
-  private logs!: InstancedMesh;
-  private pouch!: InstancedMesh;
-  private food!: InstancedMesh;
-  private readonly geos: Record<string, BufferGeometry>;
+  private readonly parts = new Map<string, Part>();
+  private readonly geos = new Map<string, BufferGeometry>();
   private readonly mat = new MeshLambertMaterial({ vertexColors: true });
+  /** Which civs' leader to crown: civId -> leader id. */
+  leaders = new Map<number, number>();
+  bannerOf: (civId: number) => number = () => 0xd9a441;
 
   constructor(private readonly terrain: Terrain) {
-    this.geos = {
-      torso: torsoGeometry(),
-      head: headGeometry(),
-      arm: armGeometry(),
-      leg: legGeometry(),
-      axe: axeGeometry(),
-      hammer: hammerGeometry(),
-      logs: logBundleGeometry(),
-      pouch: pouchGeometry(),
-      food: handFoodGeometry(),
-    };
-    for (let i = 0; i < 5; i++) this.geos[`hair${i}`] = hairGeometry(i);
-    this.allocate(32);
+    const g = this.geos;
+    g.set('thigh', thighGeometry());
+    g.set('shin', shinGeometry());
+    g.set('boot', bootGeometry());
+    g.set('upper', upperArmGeometry());
+    g.set('fore', forearmGeometry());
+    g.set('skirt', robeSkirtGeometry());
+    g.set('beard', beardGeometry());
+    g.set('mantle', mantleGeometry());
+    for (let i = 0; i < 4; i++) {
+      g.set(`garment${i}`, garmentGeometry(i));
+      g.set(`trim${i}`, garmentTrimGeometry(i));
+      g.set(`head${i}`, headGeometry(i));
+    }
+    for (let i = 0; i < 7; i++) g.set(`hair${i}`, hairGeometry(i));
+    for (let i = 1; i <= 7; i++) g.set(`hat${i}`, headwearGeometry(i));
+    for (let i = 1; i <= 3; i++) g.set(`acc${i}`, accessoryGeometry(i));
+    g.set('axe', axeGeometry());
+    g.set('hammer', hammerGeometry());
+    g.set('pick', pickGeometry());
+    g.set('basket', basketGeometry());
+    g.set('staff', staffGeometry());
+    g.set('logs', logBundleGeometry());
+    g.set('stone', stoneLoadGeometry());
+    g.set('crystal', crystalLoadGeometry());
+    g.set('pack', packGeometry());
+    this.allocate(48);
   }
+
+  private static readonly PER: Record<string, number> = { thigh: 2, shin: 2, boot: 2, upper: 2, fore: 2 };
 
   private allocate(cap: number): void {
-    for (const m of this.meshes()) {
-      this.group.remove(m);
-      m.dispose();
+    for (const p of this.parts.values()) {
+      this.group.remove(p.mesh);
+      p.mesh.dispose();
     }
+    this.parts.clear();
     this.cap = cap;
-    const mk = (geo: BufferGeometry, n: number, name: string, shadow = true) => {
-      const m = new InstancedMesh(geo, this.mat, n);
+    for (const [name, geo] of this.geos) {
+      const per = HumanView.PER[name] ?? 1;
+      const m = new InstancedMesh(geo, this.mat, cap * per);
       m.instanceMatrix.setUsage(DynamicDrawUsage);
-      m.castShadow = shadow;
+      m.castShadow = !['acc3', 'hat6', 'beard'].includes(name);
       m.receiveShadow = false;
       m.frustumCulled = false;
-      m.name = name;
-      for (let i = 0; i < n; i++) m.setMatrixAt(i, ZERO);
+      m.name = `h-${name}`;
+      m.count = 0;
       this.group.add(m);
-      return m;
-    };
-    this.torso = mk(this.geos.torso!, cap, 'h-torso');
-    this.head = mk(this.geos.head!, cap, 'h-head');
-    this.hair = [0, 1, 2, 3, 4].map((i) => mk(this.geos[`hair${i}`]!, cap, `h-hair${i}`));
-    this.arms = mk(this.geos.arm!, cap * 2, 'h-arms');
-    this.legs = mk(this.geos.leg!, cap * 2, 'h-legs');
-    this.axe = mk(this.geos.axe!, cap, 'h-axe');
-    this.hammer = mk(this.geos.hammer!, cap, 'h-hammer');
-    this.logs = mk(this.geos.logs!, cap, 'h-logs');
-    this.pouch = mk(this.geos.pouch!, cap, 'h-pouch', false);
-    this.food = mk(this.geos.food!, cap, 'h-food', false);
-    // Colours are (re)assigned in update().
+      this.parts.set(name, { mesh: m, per });
+    }
   }
 
-  private meshes(): InstancedMesh[] {
-    if (!this.torso) return [];
-    return [this.torso, this.head, ...this.hair, this.arms, this.legs, this.axe, this.hammer, this.logs, this.pouch, this.food];
-  }
-
-  /** Smoothed render position of an agent (for labels, picking, camera follow). */
   positionOf(id: number): Vector3 | null {
     const s = this.states.get(id);
     return s && s.visible ? s.pos : null;
@@ -125,203 +143,159 @@ export class HumanView {
     return this.states.get(id)?.visible ?? false;
   }
 
-  /**
-   * @param alpha interpolation factor between the previous and current simulation step
-   * @param dt real frame time (for pose blending)
-   */
+  /** Per-frame cursors into each part's instance list. */
+  private readonly cursor = new Map<string, number>();
+
+  private put(name: string, m: Matrix4, hex: number, dead: boolean): void {
+    const p = this.parts.get(name)!;
+    const i = this.cursor.get(name) ?? 0;
+    this.cursor.set(name, i + 1);
+    p.mesh.setMatrixAt(i, m);
+    _c.setHex(hex);
+    if (dead) _c.lerp(GREY, 0.55).multiplyScalar(0.8);
+    p.mesh.setColorAt(i, _c);
+  }
+
   update(agents: readonly Agent[], alpha: number, dt: number, paused: boolean): void {
     if (agents.length > this.cap) this.allocate(Math.max(agents.length, this.cap * 2));
-    const n = agents.length;
-    for (let i = 0; i < n; i++) {
-      const a = agents[i]!;
+    this.cursor.clear();
+    for (const a of agents) {
       let st = this.states.get(a.id);
       if (!st) {
-        st = {
-          pose: newPose(),
-          from: newPose(),
-          target: newPose(),
-          blend: 1,
-          anim: a.anim,
-          seed: hash01(a.id, 77),
-          pos: new Vector3(a.x, 0, a.z),
-          heading: a.heading,
-          visible: true,
-        };
+        st = { pose: newPose(), from: newPose(), target: newPose(), blend: 1, anim: a.anim, seed: hash01(a.id, 77), pos: new Vector3(a.x, 0, a.z), heading: a.heading, visible: true, phase: hash01(a.id, 5) * 6, lastX: a.x, lastZ: a.z };
         this.states.set(a.id, st);
       }
       const hidden = a.inside !== null || a.buried || a.anim === 'hidden';
       st.visible = !hidden;
-      if (hidden) {
-        this.hide(i);
-        continue;
-      }
-      // Interpolate between simulation steps for smooth motion at any speed.
+      if (hidden) continue;
       const x = a.prevX + (a.x - a.prevX) * alpha;
       const z = a.prevZ + (a.z - a.prevZ) * alpha;
       const jump = Math.hypot(x - st.pos.x, z - st.pos.z) > 3;
-      st.pos.set(x, this.terrain.heightAt(x, z), z);
+      const ground = this.terrain.heightAt(x, z);
+      const water = this.terrain.waterLevelAt(x, z);
+      const wading = water > ground + 0.1;
+      st.pos.set(x, ground, z);
       st.heading = jump ? a.heading : lerpAngle(a.prevHeading, a.heading, alpha);
-
+      // Advance the stride by distance covered: feet stay planted at any speed.
+      const moved = jump ? 0 : Math.hypot(x - st.lastX, z - st.lastZ);
+      st.lastX = x;
+      st.lastZ = z;
+      const scale = this.scaleOf(a);
+      const run = a.speed > 2.9;
+      const halfStride = (run ? 0.62 : 0.46) * scale;
+      st.phase += (moved / halfStride) * Math.PI;
       if (st.anim !== a.anim) {
         copyPose(st.from, st.pose);
         st.anim = a.anim;
         st.blend = 0;
       }
       if (!paused) st.blend = Math.min(1, st.blend + dt / BLEND_TIME);
-      computePose(
-        {
-          anim: a.anim,
-          t: a.animTime,
-          phase: a.walkPhase,
-          speed: a.speed,
-          seed: st.seed,
-          carryingWood: a.inventory.wood > 0,
-        },
-        st.target,
-      );
+      const inv = a.inventory;
+      const carry: Carry = inv.wood > 0 ? 'logs' : inv.stone > 0 ? 'stone' : inv.crystal > 0 ? 'crystal' : a.brain.active?.goal === 'envoy' ? 'pack' : inv.berries + inv.fruit + inv.mushrooms > 2 ? 'basket' : 'none';
+      computePose({ anim: a.anim, t: a.animTime, phase: st.phase, speed: a.speed, seed: st.seed, carry, wading, old: a.age > 52 }, st.target);
       blendPose(st.pose, st.from, st.target, smoothstep(0, 1, st.blend));
-      this.writeAgent(i, a, st);
+      this.writeAgent(a, st, scale, carry);
     }
-    // Only draw instances that exist (arms/legs use two per agent).
-    for (const m of this.meshes()) {
-      m.count = m === this.arms || m === this.legs ? n * 2 : n;
-      m.instanceMatrix.needsUpdate = true;
-      if (m.instanceColor) m.instanceColor.needsUpdate = true;
+    for (const [name, p] of this.parts) {
+      p.mesh.count = this.cursor.get(name) ?? 0;
+      p.mesh.instanceMatrix.needsUpdate = true;
+      if (p.mesh.instanceColor) p.mesh.instanceColor.needsUpdate = true;
     }
   }
 
-  private hide(i: number): void {
-    this.torso.setMatrixAt(i, ZERO);
-    this.head.setMatrixAt(i, ZERO);
-    for (const h of this.hair) h.setMatrixAt(i, ZERO);
-    this.arms.setMatrixAt(i * 2, ZERO);
-    this.arms.setMatrixAt(i * 2 + 1, ZERO);
-    this.legs.setMatrixAt(i * 2, ZERO);
-    this.legs.setMatrixAt(i * 2 + 1, ZERO);
-    this.axe.setMatrixAt(i, ZERO);
-    this.hammer.setMatrixAt(i, ZERO);
-    this.logs.setMatrixAt(i, ZERO);
-    this.pouch.setMatrixAt(i, ZERO);
-    this.food.setMatrixAt(i, ZERO);
+  private scaleOf(a: Agent): number {
+    const grown = Math.min(1, a.age / 15);
+    return a.look.height * (0.5 + grown * 0.5) * 1.12;
   }
 
-  private writeAgent(i: number, a: Agent, st: RenderState): void {
+  private writeAgent(a: Agent, st: RenderState, scale: number, carry: Carry): void {
     const p = st.pose;
     const L = a.look;
-    // Children are smaller with proportionally bigger heads.
     const grown = Math.min(1, a.age / 15);
-    const scale = L.height * (0.48 + grown * 0.52);
-    const headBoost = 1 + (1 - grown) * 0.38;
+    const headBoost = 1 + (1 - grown) * 0.35;
     const dead = !a.alive;
+    const old = a.age > 52;
+    const hairCol = old ? _c.setHex(L.hair).lerp(GREY, 0.6).getHex() : L.hair;
 
-    // Root: feet on the ground, facing the heading; optionally lying down.
     _q.setFromEuler(_e.set(0, st.heading, 0));
     _root.compose(st.pos, _q, _s.set(scale * L.build, scale, scale * L.build));
     if (p.lie > 0.001) {
-      _t.makeTranslation(0, 0.14 * p.lie, 0.38 * p.lie);
+      _t.makeTranslation(0, 0.16 * p.lie, 0.42 * p.lie);
       _root.multiply(_t);
-      _q.setFromEuler(_e.set(-Math.PI / 2 * p.lie, 0, p.lieRoll * p.lie));
-      _t.makeRotationFromQuaternion(_q);
-      _root.multiply(_t);
-      _t.makeTranslation(0, -0.35 * p.lie, 0);
-      _root.multiply(_t);
+      _q.setFromEuler(_e.set((-Math.PI / 2) * p.lie, 0, p.lieRoll * p.lie));
+      _root.multiply(_t.makeRotationFromQuaternion(_q));
+      _root.multiply(_t.makeTranslation(0, -0.4 * p.lie, 0));
     }
     _s.set(1, 1, 1);
-
-    // Pelvis frame (torso, head and arms hang off this).
     const hipY = p.hipY + p.bob;
-    _pelvis.copy(_root);
-    _t.makeTranslation(0, hipY, 0);
-    _pelvis.multiply(_t);
+    _pelvis.copy(_root).multiply(_t.makeTranslation(0, hipY, 0));
     _q.setFromEuler(_e.set(p.torsoPitch, p.torsoYaw, p.torsoRoll, 'YXZ'));
-    _t.makeRotationFromQuaternion(_q);
-    _pelvis.multiply(_t);
+    _pelvis.multiply(_t.makeRotationFromQuaternion(_q));
 
-    this.torso.setMatrixAt(i, _pelvis);
-    this.tint(this.torso, i, L.shirt, dead);
+    const g = Math.min(3, L.garment);
+    this.put(`garment${g}`, _pelvis, L.shirt, dead);
+    this.put(`trim${g}`, _pelvis, L.trim, dead);
+    if (L.accessory > 0) this.put(`acc${L.accessory}`, _pelvis, L.accessory === 2 ? L.trim : WHITE, dead);
+    const leader = this.leaders.get(a.civId) === a.id && a.alive;
+    if (leader) this.put('mantle', _pelvis, this.bannerOf(a.civId), dead);
 
     // Head.
-    _m.copy(_pelvis);
-    _t.makeTranslation(0, BODY.neckY, 0);
-    _m.multiply(_t);
-    _q.setFromEuler(_e.set(p.headPitch, p.headYaw, 0, 'YXZ'));
-    _t.makeRotationFromQuaternion(_q);
-    _m.multiply(_t);
+    _m.copy(_pelvis).multiply(_t.makeTranslation(0, BODY.neckY, 0));
+    _q.setFromEuler(_e.set(p.headPitch, p.headYaw, p.headRoll, 'YXZ'));
+    _m.multiply(_t.makeRotationFromQuaternion(_q));
     if (headBoost > 1.001) _m.multiply(_t.makeScale(headBoost, headBoost, headBoost));
-    this.head.setMatrixAt(i, _m);
-    this.tint(this.head, i, L.skin, dead);
-    for (let h = 0; h < this.hair.length; h++) {
-      if (h === L.hairStyle) {
-        this.hair[h]!.setMatrixAt(i, _m);
-        this.tint(this.hair[h]!, i, L.hair, dead);
-      } else this.hair[h]!.setMatrixAt(i, ZERO);
+    this.put(`head${L.face % 4}`, _m, L.skin, dead);
+    const hat = leader ? 7 : L.headwear;
+    if (hat !== 1) this.put(`hair${L.hairStyle % 7}`, _m, hairCol, dead);
+    if (L.beard && grown >= 1) this.put('beard', _m, hairCol, dead);
+    if (hat > 0 && grown >= 0.6) this.put(`hat${hat}`, _m, hat === 1 ? L.shirt : hat === 2 || hat === 3 || hat === 4 ? L.trim : WHITE, dead);
+
+    // Arms: shoulder -> elbow -> hand. Left is +x (character faces +z).
+    const arm = (side: 1 | -1, pitch: number, roll: number, bend: number, handOut: Matrix4) => {
+      _m.copy(_pelvis).multiply(_t.makeTranslation(side * BODY.shoulderX, BODY.shoulderY, 0));
+      _q.setFromEuler(_e.set(pitch, 0, side * roll, 'ZXY'));
+      _m.multiply(_t.makeRotationFromQuaternion(_q));
+      this.put('upper', _m, L.shirt, dead);
+      _m2.copy(_m).multiply(_t.makeTranslation(0, -BODY.upperArm, 0));
+      _m2.multiply(_t.makeRotationX(-bend));
+      this.put('fore', _m2, L.skin, dead);
+      handOut.copy(_m2).multiply(_t.makeTranslation(0, -BODY.forearm - 0.02, 0.01));
+    };
+    arm(1, p.armLPitch, p.armLRoll, p.armLBend, _handL);
+    arm(-1, p.armRPitch, p.armRRoll, p.armRBend, _handR);
+    _armR.copy(_handR);
+
+    // Legs: hip -> knee -> ankle, from the root (not affected by torso lean).
+    const leg = (side: 1 | -1, pitch: number, bend: number, foot: number) => {
+      _m.copy(_root).multiply(_t.makeTranslation(side * (BODY.hipX + p.legSpread * 0.5), hipY, 0));
+      _q.setFromEuler(_e.set(pitch, 0, side * p.legSpread));
+      _m.multiply(_t.makeRotationFromQuaternion(_q));
+      this.put('thigh', _m, L.pants, dead);
+      _m2.copy(_m).multiply(_t.makeTranslation(0, -BODY.thigh, 0)).multiply(_t.makeRotationX(bend));
+      this.put('shin', _m2, L.pants, dead);
+      _m2.multiply(_t.makeTranslation(0, -BODY.shin, 0)).multiply(_t.makeRotationX(-pitch - bend + foot));
+      this.put('boot', _m2, 0x5a4030, dead);
+    };
+    leg(1, p.legLPitch, p.legLBend, p.footL);
+    leg(-1, p.legRPitch, p.legRBend, p.footR);
+    if (g === 1) {
+      // The robe skirt follows the legs.
+      _m.copy(_root).multiply(_t.makeTranslation(0, hipY, 0));
+      _m.multiply(_t.makeRotationX(((p.legLPitch + p.legRPitch) / 2) * 0.75));
+      this.put('skirt', _m, L.shirt, dead);
     }
 
-    // Arms: pivot at the shoulders. Left is +x (character faces +z).
-    const armMat = (side: 1 | -1, pitch: number, roll: number, out: Matrix4) => {
-      out.copy(_pelvis);
-      _t.makeTranslation(side * BODY.shoulderX, BODY.shoulderY, 0);
-      out.multiply(_t);
-      _q.setFromEuler(_e.set(pitch, 0, side * roll, 'ZXY'));
-      _t.makeRotationFromQuaternion(_q);
-      out.multiply(_t);
-      return out;
-    };
-    armMat(1, p.armLPitch, p.armLRoll, _m);
-    this.arms.setMatrixAt(i * 2, _m);
-    this.tint(this.arms, i * 2, L.skin, dead);
-    const armR = armMat(-1, p.armRPitch, p.armRRoll, new Matrix4());
-    this.arms.setMatrixAt(i * 2 + 1, armR);
-    this.tint(this.arms, i * 2 + 1, L.skin, dead);
-
-    // Legs hang from the hips (not affected by torso lean).
-    const legMat = (side: 1 | -1, pitch: number) => {
-      _m.copy(_root);
-      _t.makeTranslation(side * (BODY.hipX + p.legSpread * 0.5), hipY, 0);
-      _m.multiply(_t);
-      _q.setFromEuler(_e.set(pitch, 0, side * p.legSpread));
-      _t.makeRotationFromQuaternion(_q);
-      _m.multiply(_t);
-      return _m;
-    };
-    this.legs.setMatrixAt(i * 2, legMat(1, p.legLPitch));
-    this.tint(this.legs, i * 2, L.pants, dead);
-    this.legs.setMatrixAt(i * 2 + 1, legMat(-1, p.legRPitch));
-    this.tint(this.legs, i * 2 + 1, L.pants, dead);
-
-    // Props.
-    const handGrip = (out: Matrix4) => {
-      out.copy(armR);
-      _t.makeTranslation(0, -BODY.armLen + 0.03, 0.01);
-      out.multiply(_t);
-      _q.setFromEuler(_e.set(-0.25, 0, 0));
-      _t.makeRotationFromQuaternion(_q);
-      out.multiply(_t);
-      return out;
-    };
-    this.axe.setMatrixAt(i, a.anim === 'chop' ? handGrip(_m) : ZERO);
-    this.hammer.setMatrixAt(i, a.anim === 'build' ? handGrip(_m) : ZERO);
-    const eating = a.anim === 'eat';
-    if (eating) {
-      _m.copy(armR);
-      this.food.setMatrixAt(i, _m);
-    } else this.food.setMatrixAt(i, ZERO);
-    const wood = a.inventory.wood;
-    if (wood > 0 && a.alive) {
-      const k = wood >= 5 ? 1 : wood >= 3 ? 0.85 : 0.7;
-      _m.copy(_pelvis);
-      _t.makeScale(k, k, k);
-      _m.multiply(_t);
-      this.logs.setMatrixAt(i, _m);
-    } else this.logs.setMatrixAt(i, ZERO);
-    const food = a.inventory.berries + a.inventory.fruit;
-    this.pouch.setMatrixAt(i, food > 0 && a.alive ? _pelvis : ZERO);
-    void _v;
-  }
-
-  private tint(mesh: InstancedMesh, i: number, hex: number, dead: boolean): void {
-    _c.setHex(hex);
-    if (dead) _c.lerp(GREY, 0.55).multiplyScalar(0.8);
-    mesh.setColorAt(i, _c);
+    // Tools and loads.
+    const grip = (hand: Matrix4) => _m.copy(hand).multiply(_t.makeRotationX(-0.25));
+    const anim = a.anim;
+    if (anim === 'chop') this.put('axe', grip(_armR), WHITE, dead);
+    else if (anim === 'mine') this.put('pick', grip(_armR), WHITE, dead);
+    else if (anim === 'build') this.put('hammer', grip(_armR), WHITE, dead);
+    else if ((anim === 'walk' || anim === 'look') && a.brain.active?.key.startsWith('expedition') && carry !== 'logs') this.put('staff', _m.copy(_armR).multiply(_t.makeRotationX(0.1)), WHITE, dead);
+    if (a.alive && (carry === 'basket' || anim === 'gather')) this.put('basket', _handL, WHITE, dead);
+    if (a.alive && carry === 'logs') this.put('logs', _pelvis, WHITE, dead);
+    else if (a.alive && carry === 'stone') this.put('stone', _pelvis, WHITE, dead);
+    else if (a.alive && carry === 'crystal') this.put('crystal', _pelvis, WHITE, dead);
+    else if (a.alive && carry === 'pack') this.put('pack', _pelvis, WHITE, dead);
   }
 }
