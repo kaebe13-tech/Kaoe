@@ -1,0 +1,30 @@
+{
+  "name": "kaoe-god-sandbox",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Kaoe — a browser-based 3D god sandbox. Watch a tiny tribe of autonomous humans survive, cooperate and build on a stylized island.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "soak": "tsx scripts/soak.ts",
+    "e2e": "node e2e/run.mjs"
+  },
+  "dependencies": {
+    "@fontsource/fredoka": "^5.3.0",
+    "@fontsource/nunito": "^5.3.0",
+    "three": "^0.186.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/three": "^0.186.0",
+    "playwright-core": "1.56.1",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.1"
+  }
+}
