@@ -54,6 +54,7 @@ export interface SaveFile {
   scorches: ScorchMark[];
   wear: string;
   feed: FeedEvent[];
+  chronicle?: FeedEvent[];
   stats: TribeStats;
 }
 
@@ -129,6 +130,7 @@ export function serialize(w: World): SaveFile {
     scorches: w.scorches.map((s) => ({ ...s })),
     wear: floatsToB64(w.wear),
     feed: w.feed.slice(-30),
+    chronicle: w.chronicle.slice(-400),
     stats: { ...w.stats },
   };
 }
@@ -193,6 +195,7 @@ export function deserialize(data: SaveFile): World {
   }
   w.idState = Math.max(data.idState, w.idState);
   for (const e of data.feed) w.feed.push(e);
+  for (const e of data.chronicle ?? []) w.chronicle.push(e);
   Object.assign(w.stats, data.stats);
   return w;
 }

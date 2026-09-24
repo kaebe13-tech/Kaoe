@@ -22,8 +22,8 @@ export class App {
   private debugToggle: (() => void) | null = null;
   volume = 0.7;
 
-  constructor(container: HTMLElement, seed: number) {
-    this.game = new Game(container, seed);
+  constructor(container: HTMLElement, seed: number, private readonly population = 6) {
+    this.game = new Game(container, seed, population);
     this.ui = new UI(this.game, {
       save: () => this.save('quick'),
       load: (slot) => this.load(slot),
@@ -173,7 +173,7 @@ export class App {
 
   newWorld(seed: number): void {
     const world = new World(seed);
-    world.spawnTribe(6);
+    world.spawnTribe(this.population);
     this.game.replaceWorld(world);
     this.ui.showToast(`A new island rises from the sea (seed ${seed}).`, 'globe');
   }

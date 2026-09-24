@@ -50,7 +50,7 @@ export function updateNeeds(a: Agent, w: World, dt: number): void {
     n.health -= hr * 0.08;
     cause = 'thirst';
   }
-  if (n.hunger > 0.3 && n.thirst > 0.3) n.health += hr * 0.02 * (asleep ? 2.5 : a.anim === 'sit' ? 1.6 : 1);
+  if (n.hunger > 0.3 && n.thirst > 0.3) n.health += hr * 0.025 * (asleep ? 3 : a.anim === 'sit' ? 2.5 : 1);
 
   // Standing in a fire.
   w.resourceHash.query(a.x, a.z, 2.2, (r) => {

@@ -561,8 +561,8 @@ const comfort: GoalFn = (a, w, ctx) => {
 };
 
 const recover: GoalFn = (a, w, ctx) => {
-  if (!a.awake || a.needs.health > 0.45 || a.needs.hunger < 0.2 || a.needs.thirst < 0.2) return null;
-  const u = (0.5 - a.needs.health) * 1.1;
+  if (!a.awake || a.needs.health > 0.55 || a.needs.hunger < 0.2 || a.needs.thirst < 0.2) return null;
+  const u = (0.6 - a.needs.health) * 1.5;
   const home = w.structure(a.homeId);
   const spot = home && home.complete ? doorSpot(w, home) : ctx.fire ? fireSeat(w, ctx.fire, a.id) : null;
   return {

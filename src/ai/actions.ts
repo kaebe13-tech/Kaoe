@@ -847,7 +847,9 @@ export class Search extends Action {
 export function invite(w: World, from: Agent, to: Agent, duration: number): boolean {
   if (!to.awake || to.inside !== null) return false;
   const act = to.brain.active;
-  if (act && (act.urgent || act.score > 0.52 || act.goal === 'chat' || act.goal === 'flee')) return false;
+  if (act && (act.urgent || act.score > 0.52 || act.goal === 'chat' || act.goal === 'flee' || act.goal === 'help' || act.goal === 'pray')) return false;
+  const step = act?.plan[act.step];
+  if (step && !step.interruptible) return false;
   const cand: Candidate = {
     goal: 'chat',
     label: `Chat with ${from.name}`,

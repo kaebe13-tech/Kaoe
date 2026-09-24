@@ -6,6 +6,8 @@ import { h, iconEl, escapeHtml, hex, setHtml, setText } from './dom';
 import { ICON_COLORS, icon } from './icons';
 import { Inspector } from './Inspector';
 import { WorldLabels } from './WorldLabels';
+import { Minimap } from './Minimap';
+import { Chronicle } from './Chronicle';
 import { activityText, initials, warnings } from './agentInfo';
 import { resourceLabel } from '../sim/types';
 import { BLUEPRINTS } from '../sim/blueprints';
@@ -29,6 +31,8 @@ export class UI {
   readonly root = h('div.ui-root');
   private readonly inspector: Inspector;
   private readonly labels: WorldLabels;
+  private readonly minimap: Minimap;
+  private readonly chronicle: Chronicle;
   private readonly dayEl = h('div.hud-day');
   private readonly clockEl = h('span');
   private readonly dialIcon = h('span.icon');
@@ -60,8 +64,10 @@ export class UI {
   ) {
     this.inspector = new Inspector(game);
     this.labels = new WorldLabels(game);
+    this.minimap = new Minimap(game);
+    this.chronicle = new Chronicle(game);
     this.help = this.buildHelp();
-    this.root.append(this.flashEl, this.labels.el, this.buildTime(), this.buildControls(), this.pausedBadge, this.buildTribe(), this.feed, this.buildPowers(), this.hint, this.inspector.el, this.toast, this.help, this.tooltip, this.modal);
+    this.root.append(h('div.vignette'), this.flashEl, this.labels.el, this.minimap.el, this.chronicle.el, this.buildTime(), this.buildControls(), this.pausedBadge, this.buildTribe(), this.feed, this.buildPowers(), this.hint, this.inspector.el, this.toast, this.help, this.tooltip, this.modal);
     this.modal.append(this.menuBody);
     this.modal.addEventListener('pointerdown', (e) => {
       if (e.target === this.modal) this.closeMenu();
@@ -71,6 +77,7 @@ export class UI {
     game.events.on('select', (id) => {
       this.inspector.show(id);
       this.help.classList.toggle('behind', id !== null);
+      this.minimap.el.classList.toggle('shifted', id !== null);
       this.renderTribe();
     });
     game.events.on('speed', () => this.renderSpeed());
@@ -95,6 +102,7 @@ export class UI {
     this.unsubWorld.length = 0;
     this.feed.innerHTML = '';
     this.labels.reset();
+    this.minimap.rebuild();
     this.unsubWorld.push(this.game.world.events.on('log', (e) => this.pushFeed(e)));
     this.inspector.show(this.game.selectedId);
     this.renderTribe();
@@ -128,7 +136,9 @@ export class UI {
     menu.append(iconEl(icon('menu')));
     const help = h('button.iconbtn.glass', { title: 'Controls (H)', onclick: () => this.help.classList.toggle('hidden') });
     help.append(iconEl(icon('keyboard')));
-    return h('div.hud-controls', {}, [speed, help, menu]);
+    const book = h('button.iconbtn.glass', { title: 'Chronicle of the tribe (C)', onclick: () => this.chronicle.toggle() });
+    book.append(iconEl(icon('book')));
+    return h('div.hud-controls', {}, [speed, book, help, menu]);
   }
 
   private buildPowers(): HTMLElement {
@@ -192,6 +202,7 @@ export class UI {
     } else if (TOOL_KEYS[e.code]) g.setTool(TOOL_KEYS[e.code]!);
     else if (e.code === 'KeyF' && g.selectedId !== null) g.follow(g.following ? null : g.selectedId);
     else if (e.code === 'KeyH') this.help.classList.toggle('hidden');
+    else if (e.code === 'KeyC') this.chronicle.toggle();
     else if (e.code === 'Tab') {
       e.preventDefault();
       this.cycleHuman(e.shiftKey ? -1 : 1);
@@ -331,6 +342,7 @@ export class UI {
 
   update(dt: number): void {
     this.labels.update();
+    this.minimap.update(dt);
     this.refresh -= dt;
     if (this.refresh <= 0) {
       this.refresh = 0.2;

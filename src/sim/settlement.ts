@@ -122,8 +122,8 @@ export function nextProject(w: World): Project | null {
   const sites = sitesOf(w);
   const huts = w.structures.filter((s) => s.kind === 'hut');
   const bedsPlanned = huts.length * BLUEPRINTS.hut.capacity;
-  // One project at a time while the tribe is small keeps effort focused.
-  if (sites.length >= (pop >= 9 ? 2 : 1)) return null;
+  // One project at a time while the tribe is small keeps effort focused; bigger tribes run more.
+  if (sites.length >= Math.min(4, Math.max(1, Math.floor(pop / 6)))) return null;
   if (bedsPlanned < adults) {
     const short = adults - bedsPlanned;
     return { kind: 'hut', reason: `${short} ${short === 1 ? 'person has' : 'people have'} no place to sleep` };

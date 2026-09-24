@@ -61,7 +61,7 @@ export class Game {
   stepsLastFrame = 0;
   private readonly mouse = { x: -1, y: -1, inside: false };
 
-  constructor(private readonly container: HTMLElement, seed: number) {
+  constructor(private readonly container: HTMLElement, seed: number, population = 6) {
     this.renderer = new WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(container.clientWidth, container.clientHeight);
@@ -79,7 +79,7 @@ export class Game {
     this.scene.fog = this.lighting.fog;
 
     const world = new World(seed);
-    world.spawnTribe(6);
+    world.spawnTribe(population);
     this.session = new WorldSession(world, this.scene, this.camera);
     this.session.effects.onFlash = (k) => this.onFlash?.(k);
     this.controls = new CameraController(this.camera, this.renderer.domElement, world.terrain);

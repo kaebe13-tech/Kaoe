@@ -56,6 +56,8 @@ export class World {
   readonly wear: Float32Array;
   wearDirty = false;
   readonly feed: FeedEvent[] = [];
+  /** Notable events kept for the tribe's history book. */
+  readonly chronicle: FeedEvent[] = [];
   /** Recent navigation trouble spots, for debugging and the soak test. */
   readonly stuckLog: Array<{ id: number; x: number; z: number; wx: number; wz: number; time: number; final: boolean }> = [];
   readonly stats: TribeStats = { births: 0, deaths: 0, built: 0, lightningStrikes: 0, friendships: 0 };
@@ -177,6 +179,10 @@ export class World {
     if (agentId !== undefined) e.agentId = agentId;
     this.feed.push(e);
     if (this.feed.length > 80) this.feed.shift();
+    if (importance >= 2) {
+      this.chronicle.push(e);
+      if (this.chronicle.length > 400) this.chronicle.shift();
+    }
     this.events.emit('log', e);
   }
 
