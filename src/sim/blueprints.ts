@@ -62,6 +62,17 @@ export const BLUEPRINTS: Record<StructureKind, Blueprint> = {
     storage: 0,
     description: 'A fenced plot of tended berry bushes close to home.',
   },
+  shrine: {
+    kind: 'shrine',
+    name: 'Shrine',
+    cost: { wood: 6 },
+    work: 30,
+    radius: 1.8,
+    blockRadius: 0.8,
+    capacity: 0,
+    storage: 0,
+    description: 'A carved totem honouring whoever watches over the island.',
+  },
   grave: {
     kind: 'grave',
     name: 'Grave',

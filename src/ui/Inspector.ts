@@ -96,7 +96,8 @@ export class Inspector {
     setText(this.avatar, initials(a.name));
     setText(this.name, a.name);
     const m = mood(a);
-    setText(this.sub, `${a.age} years · ${m.text}`);
+    const age = Math.floor(a.age);
+    setText(this.sub, `${a.isChild ? (age < 1 ? 'Newborn' : `Child, ${age}`) : `${age} years`} · ${m.text}`);
     this.followBtn.classList.toggle('on', this.game.following);
     setHtml(
       this.traits,
@@ -175,7 +176,9 @@ export class Inspector {
         f('Has eaten', `${a.stats.foodEaten} food`) +
         f('Chopped', `${a.stats.woodChopped} logs`) +
         f('Built for', `${Math.round(a.stats.workDone)} s`) +
-        f('Chats', `${a.stats.conversations}${a.stats.helped ? ` · helped ${a.stats.helped}×` : ''}`),
+        f('Chats', `${a.stats.conversations}${a.stats.helped ? ` · helped ${a.stats.helped}×` : ''}`) +
+        (a.faith > 0.05 ? f('Faith', a.faith > 0.6 ? 'Devout' : a.faith > 0.3 ? 'Believer' : 'Wondering') : '') +
+        (a.parents.length ? f('Parents', a.parents.map((id) => w.agent(id)?.name ?? '?').join(' & ')) : ''),
     );
   }
 

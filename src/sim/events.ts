@@ -17,6 +17,8 @@ export type FeedIcon =
   | 'star'
   | 'warning'
   | 'sleep'
+  | 'heart'
+  | 'shrine'
   | 'bless';
 
 export interface FeedEvent {

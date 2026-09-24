@@ -228,3 +228,62 @@ export function stakeRing(radius: number): BufferGeometry {
   parts.push(prep(rope, 0xe8dcc0));
   return merge(parts);
 }
+
+/** Carved totem with painted faces, spread wings and an offering bowl. */
+export function shrinePieces(): Piece[] {
+  const pieces: Piece[] = [];
+  const rng = new Rng(9);
+  const stones: BufferGeometry[] = [];
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    const g = new DodecahedronGeometry(0.22 + rng.range(-0.04, 0.05), 0);
+    g.scale(1, 0.7, 1);
+    g.translate(Math.cos(a) * 0.62, 0.1, Math.sin(a) * 0.62);
+    stones.push(prep(g, STONE + (i % 2) * 0x080808, true));
+  }
+  pieces.push({ geo: merge(stones), at: 0.04 });
+  const cols = [0x8a5a36, 0x9c6a40, 0x7a4c2c];
+  for (let i = 0; i < 3; i++) {
+    const seg = new CylinderGeometry(0.28 - i * 0.03, 0.3 - i * 0.03, 0.62, 8);
+    seg.translate(0, 0.33 + i * 0.62, 0);
+    const parts = [prep(seg, cols[i]!, true)];
+    // Painted face on each segment (facing +z).
+    for (const sx of [-1, 1]) {
+      const eye = new BoxGeometry(0.1, 0.07, 0.04);
+      eye.translate(sx * 0.1, 0.43 + i * 0.62, 0.27 - i * 0.03);
+      parts.push(prep(eye, i === 1 ? 0xf5f0e0 : 0x1a1410));
+    }
+    const mouth = new BoxGeometry(0.2, 0.05, 0.04);
+    mouth.translate(0, 0.22 + i * 0.62, 0.27 - i * 0.03);
+    parts.push(prep(mouth, i === 1 ? 0xd9283e : 0x1a1410));
+    const band = new CylinderGeometry(0.3 - i * 0.03, 0.3 - i * 0.03, 0.05, 8);
+    band.translate(0, 0.62 + i * 0.62, 0);
+    parts.push(prep(band, [0xe07a5f, 0x3f8f86, 0xf2c14e][i]!, true));
+    pieces.push({ geo: merge(parts), at: 0.18 + i * 0.2 });
+  }
+  const wings: BufferGeometry[] = [];
+  for (const sx of [-1, 1]) {
+    const w = new BoxGeometry(0.7, 0.26, 0.06);
+    w.rotateZ(sx * 0.35);
+    w.translate(sx * 0.5, 1.95, 0);
+    wings.push(prep(w, 0xe0a53a, true));
+    const tip = new BoxGeometry(0.3, 0.14, 0.07);
+    tip.rotateZ(sx * 0.6);
+    tip.translate(sx * 0.9, 2.12, 0);
+    wings.push(prep(tip, 0x3f8f86, true));
+  }
+  pieces.push({ geo: merge(wings), at: 0.82 });
+  const crown = new ConeGeometry(0.2, 0.4, 6);
+  crown.translate(0, 2.25, 0);
+  pieces.push({ geo: prep(crown, 0xf2c14e, true), at: 0.9 });
+  const bowl = new SphereGeometry(0.2, 10, 6, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2);
+  bowl.translate(0, 0.2, 0.55);
+  const berries: BufferGeometry[] = [prep(bowl, 0x9c6a40, true)];
+  for (let i = 0; i < 5; i++) {
+    const b = new SphereGeometry(0.05, 6, 5);
+    b.translate(rng.range(-0.1, 0.1), 0.22, 0.55 + rng.range(-0.08, 0.08));
+    berries.push(prep(b, 0xd9283e));
+  }
+  pieces.push({ geo: merge(berries), at: 0.97 });
+  return pieces;
+}

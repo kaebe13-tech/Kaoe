@@ -55,6 +55,7 @@ export function castLightning(w: World, x: number, z: number): void {
       a.emote = { icon: 'warning', until: w.time + 3 };
       if (d >= 2.4) a.addLog(w.time, 'event', d < 8 ? 'Lightning struck right next to me!' : 'Saw lightning strike nearby.');
       a.memory.addDanger({ x, z, at: w.time, kind: 'lightning' });
+      a.faith = Math.min(1, a.faith + 0.06);
       a.brain.nextThink = w.time;
     }
   }
@@ -135,9 +136,10 @@ export function bless(w: World, x: number, z: number): boolean {
   for (const a of w.agents) {
     if (!a.alive) continue;
     const d = Math.hypot(a.x - x, a.z - z);
-    if (d < 16) {
+    if (d < 22) {
       a.emote = { icon: 'star', until: w.time + 3 };
       a.addLog(w.time, 'event', 'A tree grew out of the ground in front of my eyes!');
+      a.faith = Math.min(1, a.faith + 0.18);
       a.brain.nextThink = w.time;
     }
   }
@@ -149,7 +151,14 @@ export function healAt(w: World, x: number, z: number, targetId: number | null):
   for (const a of w.agents) {
     if (!a.alive || a.inside !== null) continue;
     const d = Math.hypot(a.x - x, a.z - z);
-    if (a.id !== targetId && d > 3) continue;
+    if (a.id !== targetId && d > 3) {
+      if (d < 14) {
+        a.faith = Math.min(1, a.faith + 0.1);
+        a.addLog(w.time, 'event', 'Saw a light from the sky heal someone!');
+      }
+      continue;
+    }
+    a.faith = Math.min(1, a.faith + 0.35);
     a.needs.health = 1;
     a.needs.safety = Math.max(a.needs.safety, 0.95);
     a.needs.energy = Math.min(1, Math.max(a.needs.energy, 0.5) + 0.25);

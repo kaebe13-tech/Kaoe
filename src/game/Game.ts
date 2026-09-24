@@ -28,7 +28,7 @@ export interface GameEvents {
   frame: number;
 }
 
-const MAX_STEPS_PER_FRAME = 24;
+const MAX_STEPS_PER_FRAME = 40;
 
 /**
  * Owns the renderer, camera, input and the current world session, and runs the
@@ -230,15 +230,19 @@ export class Game {
   advance(seconds: number): void {
     const steps = Math.round(seconds / SIM_DT);
     for (let i = 0; i < steps; i++) this.session.sim.step(SIM_DT);
+    // Don't dump a backlog of effects spawned while skipping ahead.
+    this.session.effects.soft.clear();
+    this.session.effects.glow.clear();
   }
 
-  private frame = (now: number) => {
-    const realDt = Math.min(0.1, (now - this.last) / 1000);
-    this.last = now;
-    this.realTime += realDt;
-    this.fps = this.fps * 0.95 + (1 / Math.max(realDt, 1e-3)) * 0.05;
-    const t0 = performance.now();
+  /** Frames rendered so far (tests wait on this). */
+  frameCount = 0;
 
+  /**
+   * Advance simulation time for one frame of real time, honouring the speed setting.
+   * Returns the number of fixed steps taken.
+   */
+  stepSim(realDt: number): number {
     const sim = this.session.sim;
     let steps = 0;
     if (this.speed > 0) {
@@ -251,6 +255,19 @@ export class Game {
       }
       if (steps >= maxSteps) this.acc = Math.min(this.acc, SIM_DT);
     }
+    return steps;
+  }
+
+  private frame = (now: number) => {
+    // Clamp long frames (tab switches, hitches) so the simulation never jumps wildly.
+    const realDt = Math.min(0.25, (now - this.last) / 1000);
+    this.last = now;
+    this.realTime += realDt;
+    this.frameCount++;
+    this.fps = this.fps * 0.95 + (1 / Math.max(realDt, 1e-3)) * 0.05;
+    const t0 = performance.now();
+
+    const steps = this.stepSim(realDt);
     this.stepsLastFrame = steps;
     this.simMsFrame = performance.now() - t0;
     const alpha = this.speed > 0 ? this.acc / SIM_DT : 1;

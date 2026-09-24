@@ -16,7 +16,8 @@ export function updateNeeds(a: Agent, w: World, dt: number): void {
   const working = WORK_ANIMS.has(a.anim);
   const running = a.anim === 'run';
 
-  n.hunger -= hr * 0.042 * (a.has('glutton') ? 1.3 : 1) * (working ? 1.2 : 1) * (asleep ? 0.55 : 1);
+  const kid = a.isChild ? 0.75 : 1;
+  n.hunger -= hr * 0.042 * kid * (a.has('glutton') ? 1.3 : 1) * (working ? 1.2 : 1) * (asleep ? 0.55 : 1);
   n.thirst -= hr * 0.066 * (running ? 1.4 : 1) * (working ? 1.15 : 1) * (asleep ? 0.5 : 1);
   if (!asleep) n.energy -= hr * 0.045 * (a.has('sleepy') ? 1.2 : 1) * (working ? 1.35 : 1) * (running ? 1.6 : 1);
   n.social -= hr * 0.028 * (a.has('sociable') ? 1.35 : 1) * (asleep ? 0.3 : 1);
@@ -68,6 +69,8 @@ export function updateNeeds(a: Agent, w: World, dt: number): void {
 
   if (a.knocked > 0) a.knocked = Math.max(0, a.knocked - dt);
   if (a.emote && a.emote.until < w.time) a.emote = null;
+  // Faith fades slowly without new signs from above.
+  if (a.faith > 0) a.faith = Math.max(0, a.faith - (dt / (HOUR * 24)) * 0.04);
 
   warn(a, w);
   if (n.health <= 0) kill(a, w, cause || 'exhaustion');
@@ -122,6 +125,7 @@ export function kill(a: Agent, w: World, cause: string): void {
     o.needs.safety = Math.max(0, o.needs.safety - 0.2 - aff * 0.3);
     o.needs.social = Math.max(0, o.needs.social - aff * 0.3);
     o.addLog(w.time, 'event', `Mourning ${a.name}.`);
+    if (aff > 0.4) o.memory.addDanger({ x: a.x, z: a.z, at: w.time, kind: 'death' });
     if (o.homeId !== null) {
       const hut = w.structure(o.homeId);
       if (hut && hut.id === a.homeId) o.addLog(w.time, 'event', `The hut feels empty without ${a.name}.`);

@@ -121,7 +121,7 @@ export function isHarvestable(r: ResourceNode): boolean {
 // Structures
 // ---------------------------------------------------------------------------
 
-export type StructureKind = 'campfire' | 'hut' | 'storage' | 'garden' | 'grave';
+export type StructureKind = 'campfire' | 'hut' | 'storage' | 'garden' | 'shrine' | 'grave';
 
 export interface Structure {
   id: number;

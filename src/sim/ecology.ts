@@ -61,8 +61,8 @@ export class Ecology {
     if (r.state === 'grown') {
       if (r.amount >= r.max) return;
       let perUnit: number;
-      if (r.kind === 'berryBush') perUnit = HOUR * 1.7;
-      else if (r.kind === 'fruitTree') perUnit = HOUR * 3.2;
+      if (r.kind === 'berryBush') perUnit = HOUR * 3;
+      else if (r.kind === 'fruitTree') perUnit = HOUR * 5;
       else return; // trees don't regrow wood while standing
       r.regrow += (dt / perUnit) * boost;
       if (r.regrow >= 1) {

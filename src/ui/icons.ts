@@ -46,6 +46,7 @@ export const ICONS = {
   dot: S('<circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/>'),
   death: S('<path d="M7 21V10a5 5 0 0 1 10 0v11z" fill="currentColor" stroke="none"/><path d="M12 9.5v6M9.5 12h5" stroke="#1a1f24"/>'),
   clock: S('<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.5 2"/>'),
+  shrine: S('<path d="M8 21h8M12 21V9"/><path d="M5 8.5 12 5l7 3.5-7 2z" fill="currentColor"/><rect x="9.5" y="12" width="5" height="6" rx="1" fill="currentColor" stroke="none"/>'),
   seed: S('<ellipse cx="12" cy="13" rx="5" ry="7" fill="currentColor" stroke="none"/><path d="M12 6c0-1.5.8-2.5 2-3"/>'),
 } as const;
 
@@ -73,4 +74,5 @@ export const ICON_COLORS: Record<string, string> = {
   idle: '#b7d97a',
   star: '#ffe066',
   heal: '#7ef0b0',
+  shrine: '#ffd66b',
 };

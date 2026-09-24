@@ -1097,3 +1097,103 @@ export class Cower extends Action {
 export function foodInHand(a: Agent): number {
   return foodCount(a.inventory);
 }
+
+// ---------------------------------------------------------------------------
+// Faith & play
+// ---------------------------------------------------------------------------
+
+export class Pray extends Action {
+  private t = 0;
+  private glow = 0;
+
+  constructor(
+    private readonly shrineId: number,
+    private readonly duration: number,
+  ) {
+    super();
+  }
+
+  get label(): string {
+    return 'Praying at the shrine';
+  }
+
+  tick(a: Agent, w: World, dt: number): ActionStatus {
+    const s = w.structure(this.shrineId);
+    if (!s) return this.fail('The shrine is gone');
+    a.focus = { x: s.x, z: s.z };
+    a.setAnim('pray');
+    this.t += dt;
+    const hr = dt / HOUR;
+    a.needs.safety = Math.min(1, a.needs.safety + hr * 0.9);
+    a.needs.social = Math.min(1, a.needs.social + hr * 0.05);
+    a.faith = Math.min(1, a.faith + hr * 0.03);
+    this.glow += dt;
+    if (this.glow > 3) {
+      this.glow = 0;
+      w.events.emit('fx', { kind: 'sparkle', x: s.x, z: s.z, y: 1.6, count: 3 });
+    }
+    this.progress = clamp01(this.t / this.duration);
+    if (this.t >= this.duration) {
+      this.summary = 'Prayed at the shrine and felt calmer.';
+      return 'success';
+    }
+    return 'running';
+  }
+
+  override finish(a: Agent): void {
+    if (a.anim === 'pray') a.setAnim('idle');
+  }
+}
+
+/** Children dash about near a spot, pausing to jump and laugh. */
+export class Play extends Action {
+  private t = 0;
+  private hop = 0;
+
+  constructor(
+    private readonly center: V2,
+    private readonly duration: number,
+    private readonly mateName: string | null,
+  ) {
+    super();
+  }
+
+  get label(): string {
+    return this.mateName ? `Playing with ${this.mateName}` : 'Playing';
+  }
+
+  tick(a: Agent, w: World, dt: number): ActionStatus {
+    this.t += dt;
+    a.needs.social = Math.min(1, a.needs.social + (dt / HOUR) * 0.12);
+    if (this.hop > 0) {
+      this.hop -= dt;
+      a.setAnim('play');
+      if (this.hop <= 0) this.next(a, w);
+    } else if (a.nav.status === 'arrived' || a.nav.status === 'failed' || a.nav.status === 'idle') {
+      this.hop = 0.6 + w.rng.range(0, 0.8);
+      stopNav(a, w);
+    } else a.setAnim('run');
+    this.progress = clamp01(this.t / this.duration);
+    if (this.t >= this.duration) {
+      this.summary = this.mateName ? `Played with ${this.mateName}.` : 'Played for a while.';
+      return 'success';
+    }
+    return 'running';
+  }
+
+  private next(a: Agent, w: World): void {
+    const ang = w.rng.range(0, Math.PI * 2);
+    const r = w.rng.range(1.5, 4);
+    const p = w.nav.nearestWalkable(this.center.x + Math.cos(ang) * r, this.center.z + Math.sin(ang) * r, 3);
+    if (p) navigateTo(a, w, p, 0.4, true);
+  }
+
+  override begin(a: Agent, w: World): void {
+    this.next(a, w);
+  }
+
+  override finish(a: Agent, w: World): void {
+    stopNav(a, w);
+    a.setAnim('idle');
+  }
+}

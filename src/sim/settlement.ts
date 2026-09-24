@@ -84,14 +84,29 @@ export function allowedProgress(s: Structure): number {
   return frac;
 }
 
+/** Adults without a home (children live with their parents). */
 export function homeless(w: World): Agent[] {
-  return w.living.filter((a) => a.homeId === null || !w.structure(a.homeId));
+  return w.living.filter((a) => !a.isChild && (a.homeId === null || !w.structure(a.homeId)));
 }
 
-export function freeBeds(w: World): number {
+/** Adults living in a hut; children don't take up a bed. */
+export function adultResidents(w: World, hut: Structure): number {
   let n = 0;
-  for (const h of w.structures) if (h.kind === 'hut') n += BLUEPRINTS.hut.capacity - h.residents.length;
+  for (const id of hut.residents) {
+    const a = w.agent(id);
+    if (a && a.alive && !a.isChild) n++;
+  }
   return n;
+}
+
+export function hasFreeBed(w: World, hut: Structure): boolean {
+  return hut.kind === 'hut' && adultResidents(w, hut) < BLUEPRINTS.hut.capacity;
+}
+
+export function tribeFaith(w: World): number {
+  const adults = w.living.filter((a) => !a.isChild);
+  if (!adults.length) return 0;
+  return adults.reduce((s, a) => s + a.faith, 0) / adults.length;
 }
 
 export interface Project {
@@ -103,14 +118,18 @@ export interface Project {
 export function nextProject(w: World): Project | null {
   if (!campfire(w)) return { kind: 'campfire', reason: 'The tribe has no campfire to gather around' };
   const pop = w.living.length;
+  const adults = w.living.filter((a) => !a.isChild).length;
   const sites = sitesOf(w);
   const huts = w.structures.filter((s) => s.kind === 'hut');
   const bedsPlanned = huts.length * BLUEPRINTS.hut.capacity;
   // One project at a time while the tribe is small keeps effort focused.
   if (sites.length >= (pop >= 9 ? 2 : 1)) return null;
-  if (bedsPlanned < pop) {
-    const short = pop - bedsPlanned;
+  if (bedsPlanned < adults) {
+    const short = adults - bedsPlanned;
     return { kind: 'hut', reason: `${short} ${short === 1 ? 'person has' : 'people have'} no place to sleep` };
+  }
+  if (!w.structures.some((s) => s.kind === 'shrine') && tribeFaith(w) > 0.28 && huts.some((h) => h.complete)) {
+    return { kind: 'shrine', reason: 'They have seen miracles, and want to honour whoever watches over them' };
   }
   const stores = w.structures.filter((s) => s.kind === 'storage');
   if (stores.length === 0 && huts.filter((h) => h.complete).length >= 2) {
@@ -179,6 +198,7 @@ export function chooseSite(w: World, kind: StructureKind, near?: V2): SiteChoice
     hut: [6.5, 12],
     storage: [4.5, 8],
     garden: [11, 17],
+    shrine: [8, 14],
     grave: [16, 24],
   };
   const [r0, r1base] = rings[kind] ?? [6, 12];

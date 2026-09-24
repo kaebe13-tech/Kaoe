@@ -7,7 +7,8 @@ import { makeName } from '../agents/names';
 import { generateTerrain } from '../world/generateTerrain';
 import { populateResources } from '../world/populate';
 import type { Terrain } from '../world/Terrain';
-import { DAY_LENGTH, HOUR, WORLD_HALF, WORLD_SIZE } from '../world/config';
+import { DAY_LENGTH, HOUR, ISLAND_RADIUS, WORLD_HALF, WORLD_SIZE } from '../world/config';
+import { EXPLORE_CELL, EXPLORE_N, EXPLORE_ORIGIN } from '../agents/Memory';
 import { NavGrid } from '../nav/NavGrid';
 import { PathService } from '../nav/PathService';
 import { Weather } from './weather';
@@ -57,6 +58,11 @@ export class World {
   /** Recent navigation trouble spots, for debugging and the soak test. */
   readonly stuckLog: Array<{ id: number; x: number; z: number; wx: number; wz: number; time: number; final: boolean }> = [];
   readonly stats: TribeStats = { births: 0, deaths: 0, built: 0, lightningStrikes: 0 };
+  /** Walkable spots along the sea shore (for strolls and watching the waves). */
+  readonly beachSpots: V2[] = [];
+  /** Which coarse exploration cells are land (to measure how much has been explored). */
+  readonly exploreLand: Uint8Array;
+  readonly exploreLandCount: number;
 
   constructor(seed: number, options: { skipResources?: boolean } = {}) {
     this.seed = seed;
@@ -77,6 +83,43 @@ export class World {
     for (const id of this.resources.keys()) maxId = Math.max(maxId, id);
     this.idCounter = maxId + 1;
     this.buildWater();
+    this.buildBeach();
+    this.exploreLand = new Uint8Array(EXPLORE_N * EXPLORE_N);
+    let land = 0;
+    for (let cz = 0; cz < EXPLORE_N; cz++) {
+      for (let cx = 0; cx < EXPLORE_N; cx++) {
+        const x = EXPLORE_ORIGIN + (cx + 0.5) * EXPLORE_CELL;
+        const z = EXPLORE_ORIGIN + (cz + 0.5) * EXPLORE_CELL;
+        if (this.nav.nearestWalkable(x, z, 4)) {
+          this.exploreLand[cz * EXPLORE_N + cx] = 1;
+          land++;
+        }
+      }
+    }
+    this.exploreLandCount = land;
+  }
+
+  private buildBeach(): void {
+    for (let k = 0; k < 90; k++) {
+      const a = (k / 90) * TAU;
+      // March inward from the sea until we hit walkable sand.
+      for (let r = ISLAND_RADIUS * 1.4; r > 10; r -= 0.8) {
+        const x = Math.cos(a) * r;
+        const z = Math.sin(a) * r;
+        const h = this.terrain.heightAt(x, z);
+        if (h > 0.45) {
+          if (h < 1.6 && this.nav.walkable(x, z) && this.terrain.slopeAt(x, z) < 0.3) this.beachSpots.push({ x, z });
+          break;
+        }
+      }
+    }
+  }
+
+  /** Fraction (0..1) of the island's land this agent has seen. */
+  exploredFraction(a: Agent): number {
+    let seen = 0;
+    for (let i = 0; i < this.exploreLand.length; i++) if (this.exploreLand[i] && a.memory.explored[i]! > 0) seen++;
+    return seen / Math.max(1, this.exploreLandCount);
   }
 
   nextId(): number {

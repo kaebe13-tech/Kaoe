@@ -2,7 +2,7 @@ import { hash01 } from '../core/rng';
 import type { Agent } from '../agents/Agent';
 import type { World } from '../sim/World';
 import { abortActive, adopt, onCooldown, runPlan, type Candidate } from './brainCore';
-import { GOALS, buildContext } from './goals';
+import { ADULT_ONLY, GOALS, buildContext } from './goals';
 import { perceive } from './perception';
 
 /** Bonus the current goal gets when compared against alternatives (hysteresis). */
@@ -32,7 +32,8 @@ export function think(a: Agent, w: World): void {
   const now = w.time;
   const all: Candidate[] = [];
   for (const g of GOALS) {
-    const r = g(a, w, ctx);
+    if (a.isChild && ADULT_ONLY.has(g.id)) continue;
+    const r = g.fn(a, w, ctx);
     if (!r) continue;
     if (Array.isArray(r)) all.push(...r);
     else all.push(r);

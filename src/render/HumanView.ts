@@ -182,8 +182,9 @@ export class HumanView {
       blendPose(st.pose, st.from, st.target, smoothstep(0, 1, st.blend));
       this.writeAgent(i, a, st);
     }
-    for (let i = n; i < this.cap; i++) this.hide(i);
+    // Only draw instances that exist (arms/legs use two per agent).
     for (const m of this.meshes()) {
+      m.count = m === this.arms || m === this.legs ? n * 2 : n;
       m.instanceMatrix.needsUpdate = true;
       if (m.instanceColor) m.instanceColor.needsUpdate = true;
     }
@@ -207,7 +208,10 @@ export class HumanView {
   private writeAgent(i: number, a: Agent, st: RenderState): void {
     const p = st.pose;
     const L = a.look;
-    const scale = L.height * (a.age < 14 ? 0.6 + a.age * 0.028 : 1);
+    // Children are smaller with proportionally bigger heads.
+    const grown = Math.min(1, a.age / 15);
+    const scale = L.height * (0.48 + grown * 0.52);
+    const headBoost = 1 + (1 - grown) * 0.38;
     const dead = !a.alive;
 
     // Root: feet on the ground, facing the heading; optionally lying down.
@@ -243,6 +247,7 @@ export class HumanView {
     _q.setFromEuler(_e.set(p.headPitch, p.headYaw, 0, 'YXZ'));
     _t.makeRotationFromQuaternion(_q);
     _m.multiply(_t);
+    if (headBoost > 1.001) _m.multiply(_t.makeScale(headBoost, headBoost, headBoost));
     this.head.setMatrixAt(i, _m);
     this.tint(this.head, i, L.skin, dead);
     for (let h = 0; h < this.hair.length; h++) {

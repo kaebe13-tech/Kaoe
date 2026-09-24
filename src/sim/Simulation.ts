@@ -2,12 +2,14 @@ import { updateBrain } from '../ai/Brain';
 import { updateLocomotion } from '../ai/locomotion';
 import { HOUR } from '../world/config';
 import { Ecology } from './ecology';
+import { Families } from './family';
 import { updateNeeds } from './needs';
 import { World } from './World';
 
 /** Owns the world and advances it in fixed steps. Has no rendering dependencies. */
 export class Simulation {
   readonly ecology = new Ecology();
+  readonly families = new Families();
   /** Profiling (ms) of the last step, for the debug overlay. */
   lastStepMs = 0;
   stepCount = 0;
@@ -40,6 +42,7 @@ export class Simulation {
       a.animTime += dt;
     }
     this.ecology.update(w, dt);
+    this.families.update(w, dt);
     this.stepCount++;
     this.lastStepMs = performance.now() - t0;
   }

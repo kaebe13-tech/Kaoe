@@ -237,6 +237,13 @@ export function rockGeometry(seed: number): BufferGeometry {
   return prep(g, gradient(PAL.rockDark, PAL.rockLight, -0.2, 1.1, 0.06, rng), true);
 }
 
+/** Very low-poly stone for decorative scatter. */
+export function pebbleGeometry(): BufferGeometry {
+  const g = lumpy(new IcosahedronGeometry(1, 0), 0.25, 555);
+  g.scale(1, 0.6, 1);
+  return prep(g, gradient(PAL.rockDark, PAL.rockLight, -0.6, 0.6), true);
+}
+
 export function stumpGeometry(): BufferGeometry {
   const parts = [
     prep(place(new CylinderGeometry(0.22, 0.3, 0.38, 8), 0, 0.19, 0), PAL.trunk, true),

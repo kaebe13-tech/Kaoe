@@ -19,6 +19,7 @@ import {
   tribeStored,
   workSpot,
   allowedProgress,
+  hasFreeBed,
 } from '../sim/settlement';
 import {
   CARRY_CAPACITY,
@@ -55,6 +56,8 @@ import {
   Tend,
   WaitUnderTree,
   Withdraw,
+  Pray,
+  Play,
   approachPoint,
   fleePoint,
   pickLine,
@@ -247,7 +250,7 @@ export function bestFoodSource(a: Agent, w: World, need: number, only?: ItemType
     let est = m.amount;
     if (est <= 0) {
       const since = now - m.seenAt;
-      est = Math.min(3, Math.floor(since / (HOUR * (item === 'fruit' ? 3.2 : 1.7))));
+      est = Math.min(3, Math.floor(since / (HOUR * (item === 'fruit' ? 5 : 3))));
     }
     if (est <= 0) continue;
     const avail = est - r.claims * 2.5;
@@ -404,7 +407,7 @@ const sleep: GoalFn = (a, w, ctx) => {
     };
   }
   // Homeless: claim a free bed if there is one.
-  const freeHut = w.structures.find((s) => s.kind === 'hut' && s.complete && s.residents.length < BLUEPRINTS.hut.capacity);
+  const freeHut = a.isChild ? undefined : w.structures.find((s) => s.complete && hasFreeBed(w, s));
   if (freeHut) {
     return {
       goal: 'sleep',
@@ -463,7 +466,7 @@ class ClaimBed extends Rest {
     const hut = w.structure(this.hutId);
     if (!hut) return this.fail('The hut is gone');
     if (!hut.residents.includes(a.id)) {
-      if (hut.residents.length >= BLUEPRINTS.hut.capacity) return this.fail('Someone else took the last bed');
+      if (!hasFreeBed(w, hut)) return this.fail('Someone else took the last bed');
       hut.residents.push(a.id);
       a.homeId = hut.id;
       const mates = hut.residents.filter((id) => id !== a.id).map((id) => w.agent(id)?.name).filter(Boolean);
@@ -1049,6 +1052,8 @@ export function exploreTarget(a: Agent, w: World, purpose: 'food' | 'water' | 'a
 const explore: GoalFn = (a, w, ctx) => {
   if (!a.awake || a.needs.energy < 0.3) return null;
   let u = 0.12 + (a.has('curious') ? 0.13 : 0) + (a.memory.knownFoodCount() < 3 ? 0.08 : 0) - (a.has('timid') ? 0.04 : 0);
+  // Once most of the island is familiar, wanderlust fades.
+  u *= 1 - w.exploredFraction(a) * 0.75;
   if (ctx.night) u *= 0.25;
   if (ctx.rain > 0.3) u *= 0.4;
   const dest = exploreTarget(a, w, 'any');
@@ -1069,25 +1074,161 @@ const explore: GoalFn = (a, w, ctx) => {
 
 const idle: GoalFn = (a, w, ctx) => {
   if (!a.awake) return null;
+  const slot = Math.floor(ctx.now / 20);
+  const roll = hash01(a.id * 5, slot);
+  // Children stay close to a parent (or home) when they have nothing else to do.
+  const parent = a.isChild ? a.parents.map((id) => w.agent(id)).find((p) => p && p.alive && p.inside === null) : undefined;
   const home = w.structure(a.homeId);
-  const center = home && home.complete ? home : ctx.camp;
-  const ang = hash01(a.id, Math.floor(ctx.now / 20)) * Math.PI * 2;
-  const r = 2 + hash01(a.id + 3, Math.floor(ctx.now / 20)) * 6;
+  const center = parent ?? (home && home.complete ? home : ctx.camp);
+  const base = {
+    goal: 'idle' as const,
+    label: 'Relax',
+    icon: 'idle' as const,
+    score: 0.05,
+    reason: a.isChild ? 'Too young to work — staying near family' : 'Needs are met and there is no pressing work',
+    key: 'idle',
+  };
+  // Stargazing on clear evenings.
+  if (!a.isChild && ctx.hour >= 20 && ctx.hour < 22.5 && ctx.rain < 0.1 && roll < (a.has('curious') ? 0.7 : 0.35)) {
+    const ang = roll * 40;
+    const spot = w.nav.nearestWalkable(ctx.camp.x + Math.cos(ang) * 6, ctx.camp.z + Math.sin(ang) * 6, 5);
+    if (spot) {
+      return {
+        ...base,
+        label: 'Watch the stars',
+        icon: 'star',
+        targetLabel: 'A quiet spot near camp',
+        target: spot,
+        thought: pickLine(a, ['So many stars tonight...', 'I wonder who lives up there.', 'The sky is so big.']),
+        build: () => [new MoveTo(() => spot, 'a quiet spot', { arrive: 0.6 }), new Rest(25, 'stargaze', 'Gazing at the stars')],
+      };
+    }
+  }
+  // Watching the waves from the beach.
+  if (!a.isChild && !ctx.night && roll > 0.55 && w.beachSpots.length) {
+    let best: V2 | null = null;
+    let bd = Infinity;
+    for (const b of w.beachSpots) {
+      const d = dist(a, b);
+      if (d < bd) {
+        bd = d;
+        best = b;
+      }
+    }
+    if (best && bd < 40) {
+      const b: V2 = best;
+      const sea = { x: b.x * 1.4, z: b.z * 1.4 };
+      return {
+        ...base,
+        label: 'Watch the waves',
+        icon: 'idle',
+        targetLabel: `The beach (${Math.round(bd)}m)`,
+        target: b,
+        thought: pickLine(a, ['The sea is calm today.', 'I love the sound of the waves.', 'Somewhere out there is where we came from.']),
+        build: () => [new MoveTo(() => b, 'the beach', { arrive: 1 }), new Rest(20 + roll * 15, 'sit', 'Watching the waves', sea)],
+      };
+    }
+  }
+  const ang = hash01(a.id, slot) * Math.PI * 2;
+  const r = (a.isChild ? 1.5 : 2) + hash01(a.id + 3, slot) * (a.isChild ? 3 : 6);
   const spot = w.nav.nearestWalkable(center.x + Math.cos(ang) * r, center.z + Math.sin(ang) * r, 5);
   if (!spot) return null;
   const sit = hash01(a.id, Math.floor(ctx.now / 13)) < 0.5;
   return {
-    goal: 'idle',
-    label: 'Relax',
-    icon: 'idle',
-    score: 0.05,
-    reason: 'Needs are met and there is no pressing work',
-    targetLabel: home ? 'Near home' : 'Around camp',
+    ...base,
+    targetLabel: parent ? `Near ${parent.name}` : home ? 'Near home' : 'Around camp',
     target: spot,
-    key: 'idle',
-    thought: pickLine(a, ['What a lovely day.', 'Nothing to do for a moment. Nice.', 'I could get used to island life.', 'Listening to the waves...']),
+    thought: a.isChild ? pickLine(a, ['Where did everyone go?', 'I want to help too!', 'When I grow up I will build a hut.']) : pickLine(a, ['What a lovely day.', 'Nothing to do for a moment. Nice.', 'I could get used to island life.', 'Listening to the birds...']),
     build: () => [new MoveTo(() => spot, 'a quiet spot', { arrive: 0.6 }), new Rest(6 + hash01(a.id, 99) * 6, sit ? 'sit' : 'look', sit ? 'Sitting down for a while' : 'Taking in the view')],
   };
 };
 
-export const GOALS: GoalFn[] = [flee, drink, eat, sleep, shelter, comfort, recover, help, socialize, found, supply, construct, haul, tendFire, explore, idle];
+const pray: GoalFn = (a, w, ctx) => {
+  if (!a.awake || a.faith < 0.12 || (a.isChild && a.age < 6)) return null;
+  const shrine = w.structures.find((s) => s.kind === 'shrine' && s.complete);
+  if (!shrine) return null;
+  let u = a.faith * 0.22;
+  if (a.needs.safety < 0.65) u += (0.65 - a.needs.safety) * 0.9;
+  const h = ctx.hour;
+  if ((h >= 6 && h < 7.5) || (h >= 18 && h < 19.5)) u += 0.12 * a.faith;
+  const grief = a.memory.dangers.some((d) => d.kind === 'death' && ctx.now - d.at < DAY_LENGTH);
+  if (grief) u += 0.15;
+  if (u < 0.08) return null;
+  const d = dist(a, shrine);
+  const spot = () => workSpot(w, shrine, a.id);
+  return {
+    goal: 'pray',
+    label: 'Pray',
+    icon: 'star',
+    score: u * travel(d),
+    reason: a.needs.safety < 0.5 ? 'Frightened, and hoping for protection' : grief ? 'Mourning a loss' : 'Giving thanks to whoever watches over them',
+    targetLabel: `The shrine (${Math.round(d)}m)`,
+    target: shrine,
+    key: 'pray',
+    thought: pickLine(a, ['Whoever you are up there... thank you.', 'Please keep us safe.', 'I know someone is watching.', 'Give us good harvests.']),
+    build: () => [new MoveTo(spot, 'the shrine', { arrive: 0.5 }), new Pray(shrine.id, 14 + hash01(a.id, 5) * 8)],
+    onComplete: (ag, wd) => {
+      ag.brain.cooldowns.set('pray', wd.time + DAY_LENGTH * 0.4);
+      return 'Prayed at the shrine and felt calmer.';
+    },
+  };
+};
+
+const play: GoalFn = (a, w, ctx) => {
+  if (!a.isChild || !a.awake || ctx.night || ctx.rain > 0.3) return null;
+  let mate: Agent | null = null;
+  let md = Infinity;
+  for (const o of w.agents) {
+    if (o === a || !o.alive || !o.awake || o.inside !== null) continue;
+    const d = dist(a, o);
+    const kid = o.isChild;
+    const score = d - (kid ? 20 : 0) - (a.parents.includes(o.id) ? 8 : 0);
+    if (d < 35 && score < md) {
+      md = score;
+      mate = o;
+    }
+  }
+  const m: Agent | null = mate;
+  const center = m ? { x: (a.x + m.x) / 2, z: (a.z + m.z) / 2 } : ctx.camp;
+  const spot = w.nav.nearestWalkable(center.x, center.z, 4);
+  if (!spot) return null;
+  return {
+    goal: 'play',
+    label: m ? `Play with ${m.name}` : 'Play',
+    icon: 'star',
+    score: 0.22 + (a.needs.social < 0.6 ? 0.08 : 0),
+    reason: 'Children love to play',
+    targetLabel: m ? m.name : 'Around camp',
+    target: spot,
+    key: 'play',
+    thought: pickLine(a, ["Can't catch me!", 'Tag, you’re it!', 'Wheee!', 'Let’s race to the fire!']),
+    build: () => [new MoveTo(() => spot, 'the playground', { arrive: 1, run: true }), new Play(spot, 14 + hash01(a.id, 3) * 10, m ? m.name : null)],
+    onComplete: (ag, wd) => {
+      ag.brain.cooldowns.set('play', wd.time + 25);
+    },
+  };
+};
+
+/** Goals children never pursue. */
+export const ADULT_ONLY = new Set(['found', 'supply', 'construct', 'haul', 'tendFire', 'explore', 'help']);
+
+export const GOALS: Array<{ id: string; fn: GoalFn }> = [
+  { id: 'flee', fn: flee },
+  { id: 'drink', fn: drink },
+  { id: 'eat', fn: eat },
+  { id: 'sleep', fn: sleep },
+  { id: 'shelter', fn: shelter },
+  { id: 'comfort', fn: comfort },
+  { id: 'recover', fn: recover },
+  { id: 'help', fn: help },
+  { id: 'socialize', fn: socialize },
+  { id: 'pray', fn: pray },
+  { id: 'play', fn: play },
+  { id: 'found', fn: found },
+  { id: 'supply', fn: supply },
+  { id: 'construct', fn: construct },
+  { id: 'haul', fn: haul },
+  { id: 'tendFire', fn: tendFire },
+  { id: 'explore', fn: explore },
+  { id: 'idle', fn: idle },
+];

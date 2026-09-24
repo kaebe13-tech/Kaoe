@@ -32,6 +32,7 @@ import {
   fruitTree,
   grassTuftGeometry,
   palmTree,
+  pebbleGeometry,
   pineTree,
   reedGeometry,
   rockGeometry,
@@ -53,7 +54,39 @@ const ZERO = new Matrix4().makeScale(0, 0, 0);
 
 interface Slots {
   tree: number; // index within its variant mesh
-  aux: number; // index into stump/sapling/burnt meshes (all trees share)
+  aux: number; // unused (kept for layout compatibility)
+}
+
+/** Free-list allocator so rarely used instance buffers only draw what's in use. */
+class SlotPool {
+  private free: number[] = [];
+  private high = 0;
+  readonly owner = new Map<number, number>();
+
+  constructor(private readonly mesh: InstancedMesh) {
+    mesh.count = 0;
+  }
+
+  get(id: number): number {
+    let s = this.owner.get(id);
+    if (s !== undefined) return s;
+    s = this.free.length ? this.free.pop()! : this.high++;
+    if (s >= this.mesh.instanceMatrix.count) {
+      this.high--;
+      return -1;
+    }
+    this.owner.set(id, s);
+    this.mesh.count = Math.max(this.mesh.count, s + 1);
+    return s;
+  }
+
+  release(id: number): void {
+    const s = this.owner.get(id);
+    if (s === undefined) return;
+    this.owner.delete(id);
+    this.mesh.setMatrixAt(s, ZERO);
+    this.free.push(s);
+  }
 }
 
 /**
@@ -102,16 +135,19 @@ export class VegetationView {
     this.stumps = this.makeMesh(stumpGeometry(), plain, cap, 'stumps');
     this.saplings = this.makeMesh(saplingGeometry(), windMaterial({ amplitude: 0.03, frequency: 1.6, key: 'sapling' }), cap, 'saplings');
     this.burnt = this.makeMesh(burntTreeGeometry(), plain, cap, 'burnt');
+    this.stumpPool = new SlotPool(this.stumps);
+    this.saplingPool = new SlotPool(this.saplings);
+    this.burntPool = new SlotPool(this.burnt);
 
     const bushes = resources.filter((r) => r.kind === 'berryBush');
-    const bushCap = bushes.length + 128;
+    const bushCap = bushes.length + 48;
     this.bushes = this.makeMesh(bushGeometry(5), windMaterial({ amplitude: 0.02, frequency: 1.4, key: 'bush' }), bushCap, 'bushes');
-    const berryGeo = new IcosahedronGeometry(0.085, 1);
-    this.berries = this.makeMesh(berryGeo, new MeshLambertMaterial({ color: PAL.berry, emissive: 0x3a0008 }), bushCap * BERRY_SLOTS.length, 'berries');
+    const berryGeo = new IcosahedronGeometry(0.09, 0);
+    this.berries = this.makeMesh(berryGeo, new MeshLambertMaterial({ color: PAL.berry, emissive: 0x3a0008, flatShading: true }), bushCap * BERRY_SLOTS.length, 'berries');
     this.berries.castShadow = false;
 
     const fts = resources.filter((r) => r.kind === 'fruitTree');
-    const ftCap = fts.length + 64;
+    const ftCap = fts.length + 40;
     this.fruitTrees = this.makeMesh(fruitTree(7), leafMat, ftCap, 'fruit-trees');
     this.fruits = this.makeMesh(new IcosahedronGeometry(0.16, 1), new MeshLambertMaterial({ color: PAL.fruit, emissive: 0x401200 }), ftCap * FRUIT_SLOTS.length, 'fruits');
 
@@ -149,6 +185,9 @@ export class VegetationView {
   }
 
   private nextFree: { tree: number[]; aux: number; bush: number; ft: number };
+  private stumpPool!: SlotPool;
+  private saplingPool!: SlotPool;
+  private burntPool!: SlotPool;
 
   /** A standalone copy of a tree (used for the felling animation). */
   treeMesh(variant: number): Mesh {
@@ -228,9 +267,9 @@ export class VegetationView {
     if (!s) return;
     if (r.kind === 'tree') {
       this.treeMeshes[r.variant]!.setMatrixAt(s.tree, ZERO);
-      this.stumps.setMatrixAt(s.aux, ZERO);
-      this.saplings.setMatrixAt(s.aux, ZERO);
-      this.burnt.setMatrixAt(s.aux, ZERO);
+      this.stumpPool.release(r.id);
+      this.saplingPool.release(r.id);
+      this.burntPool.release(r.id);
     } else if (r.kind === 'berryBush') {
       this.bushes.setMatrixAt(s.tree, ZERO);
       for (let i = 0; i < BERRY_SLOTS.length; i++) this.berries.setMatrixAt(s.tree * BERRY_SLOTS.length + i, ZERO);
@@ -257,13 +296,18 @@ export class VegetationView {
       case 'tree': {
         const main = this.treeMeshes[r.variant]!;
         const grownScale = r.scale;
-        const show = (mesh: InstancedMesh, idx: number, visible: boolean, scale: number) => {
-          mesh.setMatrixAt(idx, visible ? this.base(r, scale, 0.05, shake, _m) : ZERO);
+        main.setMatrixAt(s.tree, r.state === 'grown' ? this.base(r, grownScale * (r.burning > 0 ? 0.97 : 1), 0.05, shake, _m) : ZERO);
+        const pooled = (pool: SlotPool, mesh: InstancedMesh, visible: boolean, scale: number) => {
+          if (!visible) {
+            pool.release(r.id);
+            return;
+          }
+          const idx = pool.get(r.id);
+          if (idx >= 0) mesh.setMatrixAt(idx, this.base(r, scale, 0.05, shake, _m));
         };
-        show(main, s.tree, r.state === 'grown', grownScale * (r.burning > 0 ? 0.97 : 1));
-        show(this.stumps, s.aux, r.state === 'stump', r.scale);
-        show(this.saplings, s.aux, r.state === 'sapling', r.scale * (0.35 + r.growth * 0.9));
-        show(this.burnt, s.aux, r.state === 'burnt', r.scale);
+        pooled(this.stumpPool, this.stumps, r.state === 'stump', r.scale);
+        pooled(this.saplingPool, this.saplings, r.state === 'sapling', r.scale * (0.35 + r.growth * 0.9));
+        pooled(this.burntPool, this.burnt, r.state === 'burnt', r.scale);
         if (r.state === 'grown') {
           const h = hash01(r.id, 3);
           _c.setRGB(1, 1, 1).offsetHSL((h - 0.5) * 0.05, (h - 0.5) * 0.15, (hash01(r.id, 9) - 0.5) * 0.1);
@@ -462,7 +506,7 @@ export class VegetationView {
       _s.setScalar(rng.range(0.1, 0.3));
       pm.push(new Matrix4().compose(_p, _q, _s));
     }
-    const pebbles = new InstancedMesh(rockGeometry(555), new MeshLambertMaterial({ vertexColors: true }), pm.length);
+    const pebbles = new InstancedMesh(pebbleGeometry(), new MeshLambertMaterial({ vertexColors: true, flatShading: true }), pm.length);
     pm.forEach((mm, i) => pebbles.setMatrixAt(i, mm));
     pebbles.computeBoundingSphere();
     pebbles.receiveShadow = true;

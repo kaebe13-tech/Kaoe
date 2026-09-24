@@ -1,7 +1,7 @@
 import type { Agent } from '../agents/Agent';
 import { TAU } from '../core/math';
 import { BLUEPRINTS } from './blueprints';
-import { allowedProgress, campCenter, homeless } from './settlement';
+import { adultResidents, allowedProgress, campCenter, homeless } from './settlement';
 import { ITEM_TYPES, type ItemType, type ResourceNode, type Structure } from './types';
 import type { World } from './World';
 
@@ -65,6 +65,7 @@ export function completeStructure(w: World, s: Structure): void {
 export function assignResidents(w: World, hut: Structure): void {
   const cap = BLUEPRINTS.hut.capacity;
   const candidates = homeless(w);
+  if (!candidates.length) return;
   candidates.sort((a, b) => {
     const ab = hut.builders.includes(a.id) ? 1 : 0;
     const bb = hut.builders.includes(b.id) ? 1 : 0;
@@ -80,7 +81,7 @@ export function assignResidents(w: World, hut: Structure): void {
     if (rest[0]) chosen.push(rest[0]);
   }
   for (const a of chosen) {
-    if (hut.residents.length >= cap) break;
+    if (adultResidents(w, hut) >= cap) break;
     hut.residents.push(a.id);
     a.homeId = hut.id;
     a.addLog(w.time, 'event', `Moved into the new hut${chosen.length > 1 ? ` with ${chosen.filter((c) => c !== a).map((c) => c.name).join(', ')}` : ''}.`);

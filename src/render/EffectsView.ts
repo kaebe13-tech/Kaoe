@@ -97,8 +97,8 @@ export class EffectsView {
       case 'dust':
       case 'buildDust': {
         const cc = c(0xd8c49a);
-        const big = e.kind === 'buildDust' ? 1.6 : 1;
-        this.burst(e.count ?? 8, () => ({ x: e.x + (R() - 0.5) * 1.5 * big, y: y - 0.3 + R() * 0.3, z: e.z + (R() - 0.5) * 1.5 * big, vx: (R() - 0.5) * 1.2, vy: 0.5 + R() * 0.8, vz: (R() - 0.5) * 1.2, life: 1 + R() * 0.8, size: 0.35 * big, grow: 2.2, r: cc.r, g: cc.g, b: cc.b, a: 0.55, drag: 1.5 }));
+        const big = e.kind === 'buildDust' ? 1.3 : 1;
+        this.burst(Math.min(e.count ?? 8, 16), () => ({ x: e.x + (R() - 0.5) * 1.5 * big, y: y - 0.3 + R() * 0.3, z: e.z + (R() - 0.5) * 1.5 * big, vx: (R() - 0.5) * 1.2, vy: 0.4 + R() * 0.6, vz: (R() - 0.5) * 1.2, life: 0.8 + R() * 0.6, size: 0.26 * big, grow: 2, r: cc.r, g: cc.g, b: cc.b, a: 0.38, drag: 1.5 }));
         break;
       }
       case 'splash': {

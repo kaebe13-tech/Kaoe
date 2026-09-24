@@ -373,6 +373,7 @@ export class UI {
 
   private renderSpeed(): void {
     for (const [s, b] of this.speedBtns) b.classList.toggle('on', s === this.game.speed);
+    this.pausedBadge.classList.toggle('on', this.game.speed === 0);
   }
 
   private renderTools(): void {

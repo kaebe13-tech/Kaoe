@@ -18,7 +18,7 @@ import { clamp01, smoothstep } from '../core/math';
 import type { Terrain } from '../world/Terrain';
 import { BLUEPRINTS } from '../sim/blueprints';
 import type { Structure } from '../sim/types';
-import { campfirePieces, gardenPieces, gravePieces, hutPieces, logPileGeometry, stakeRing, storagePieces, type Piece } from './structureGeometry';
+import { campfirePieces, gardenPieces, gravePieces, hutPieces, logPileGeometry, shrinePieces, stakeRing, storagePieces, type Piece } from './structureGeometry';
 import { prep } from './geometry';
 
 interface Entry {
@@ -77,6 +77,9 @@ export class StructureView {
         break;
       case 'garden':
         defs = gardenPieces();
+        break;
+      case 'shrine':
+        defs = shrinePieces();
         break;
       default:
         defs = gravePieces();

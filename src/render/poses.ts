@@ -267,6 +267,30 @@ export function computePose(p: PoseInput, out: Pose): Pose {
       o.headPitch = -0.25;
       break;
     }
+    case 'play': {
+      const j = Math.abs(Math.sin(t * 8.5 + p.seed * 3));
+      o.bob = j * 0.2;
+      o.armLPitch = -2.4 + Math.sin(t * 11) * 0.5;
+      o.armRPitch = -1.2 - Math.sin(t * 11) * 0.6;
+      o.armLRoll = o.armRRoll = 0.45;
+      o.legLPitch = -j * 0.5;
+      o.legRPitch = j * 0.2;
+      o.headPitch = -0.2;
+      o.torsoYaw = Math.sin(t * 5) * 0.2;
+      break;
+    }
+    case 'stargaze': {
+      o.hipY = 0.15;
+      o.legLPitch = -1.42;
+      o.legRPitch = -1.35;
+      o.legSpread = 0.14;
+      o.torsoPitch = -0.35 + breath;
+      o.armLPitch = o.armRPitch = 0.75;
+      o.armLRoll = o.armRRoll = 0.25;
+      o.headPitch = -0.75;
+      o.headYaw = Math.sin(t * 0.2 + p.seed * 4) * 0.3;
+      break;
+    }
     case 'tend': {
       o.hipY = 0.27;
       o.legLPitch = -1.05;

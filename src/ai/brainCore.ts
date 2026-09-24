@@ -21,6 +21,8 @@ export type GoalId =
   | 'tendFire'
   | 'explore'
   | 'idle'
+  | 'pray'
+  | 'play'
   | 'recover';
 
 export type IconId =

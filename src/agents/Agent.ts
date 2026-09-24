@@ -46,6 +46,8 @@ export type AnimState =
   | 'pray'
   | 'look'
   | 'catchRain'
+  | 'play'
+  | 'stargaze'
   | 'hidden';
 
 export type NavStatus = 'idle' | 'pending' | 'moving' | 'arrived' | 'failed';
@@ -85,6 +87,8 @@ export interface AgentStats {
   distance: number;
 }
 
+export const ADULT_AGE = 15;
+
 const SKINS = [0xf6d2b0, 0xeec19a, 0xdca47a, 0xc68a5e, 0xa46a44, 0x7f4f33, 0x5f3a25];
 const HAIRS = [0x2b1d14, 0x3d2a1c, 0x5b3b24, 0x8a5a2b, 0xc98d3e, 0xe0c07a, 0xa3402a, 0x1a1a1a, 0x9a9a9a];
 const SHIRTS = [0xc0583a, 0x3c6e9f, 0xd9a441, 0x6c8e3f, 0x8e5aa8, 0xe07a5f, 0x3f8f86, 0xb84a6b, 0xe8d6b0, 0x5a7bd0];
@@ -95,8 +99,13 @@ export class Agent {
   name: string;
   traits: TraitId[];
   look: Appearance;
-  /** Age in years; used for flavour and (later) children. */
+  /** Age in years. Children (under ADULT_AGE) don't work and grow a few years per day. */
   age: number;
+  /** 0..1 belief that someone watches over the island; grows when miracles are witnessed. */
+  faith = 0;
+  /** Ids of the parents for children born on the island. */
+  parents: number[] = [];
+  bornAt = 0;
 
   x: number;
   z: number;
@@ -164,6 +173,10 @@ export class Agent {
     this.traits = traits;
     this.look = look;
     this.age = age;
+  }
+
+  get isChild(): boolean {
+    return this.age < ADULT_AGE;
   }
 
   has(t: TraitId): boolean {
